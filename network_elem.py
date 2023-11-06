@@ -8,7 +8,6 @@ from utils.utils import GaussianSmoothing
 
 
 class DownSample(nn.Module):
-
     def __init__(self, dim, dim_out, t_emb_dim):
         super().__init__()
         self.conv = nn.Conv2d(dim * 4, dim_out, (1, 1))
@@ -33,7 +32,6 @@ class DownSample(nn.Module):
 
 
 class UpSample(nn.Module):
-
     def __init__(self, dim, dim_out, t_emb_dim):
         super().__init__()
         self.up = nn.Upsample(scale_factor=2, mode="nearest")
@@ -72,7 +70,6 @@ class SinusoidalPosEmbed(nn.Module):
 
 
 class AttentionPool1d(nn.Module):
-
     def __init__(self, pose_embeb_dim, device, num_heads=1):
         """
         Clip inspired 1D attention pooling, reduce garment and person pose along keypoints
@@ -86,9 +83,7 @@ class AttentionPool1d(nn.Module):
         self.v_proj = nn.Linear(pose_embeb_dim, pose_embeb_dim)
         self.c_proj = nn.Linear(pose_embeb_dim, pose_embeb_dim)
         self.num_heads = num_heads
-
         self.pos_encoding = SinusoidalPosEmbed(pose_embeb_dim)
-
         self.device = device
 
     def forward(self, x, time_step, noise_level=0.3):
@@ -126,19 +121,16 @@ class AttentionPool1d(nn.Module):
                                       conv_dim=1).to(self.device)
 
         x_noisy = smoothing(F.pad(x, (1, 1), mode='reflect'))
-
         x = x + x_noisy
-
         x += self.pos_encoding(time_step)[:, None, :]
+
         return x.squeeze(1)
 
 
 class FiLM(nn.Module):
-
     def __init__(self, clip_dim, channels):
         super().__init__()
         self.channels = channels
-
         self.fc = nn.Linear(clip_dim, 2 * channels)
         self.activation = nn.ReLU(True)
 
@@ -148,6 +140,7 @@ class FiLM(nn.Module):
         gamma = clip_pooled_embed[:, 0:self.channels]
         beta = clip_pooled_embed[:, self.channels:self.channels + 1]
         film_features = torch.add(torch.mul(img_embed, gamma[:, :, None, None]), beta[:, :, None, None])
+
         return film_features
 
 
@@ -159,12 +152,10 @@ class LayerNorm(nn.Module):
     def __init__(self, feats, dim=-1):
         super().__init__()
         self.dim = dim
-
         self.g = nn.Parameter(torch.ones(feats, *((1,) * (-dim - 1))))
 
     def forward(self, x):
         dtype, dim = x.dtype, self.dim
-
         eps = 1e-5 if x.dtype == torch.float32 else 1e-3
         var = torch.var(x, dim=dim, unbiased=False, keepdim=True)
         mean = torch.mean(x, dim=dim, keepdim=True)
@@ -190,21 +181,15 @@ class SelfAttention(nn.Module):
         """
         super().__init__()
         self.scale = scale
-
         self.heads = heads
         inner_dim = dim_head * heads
-
         self.norm = LayerNorm(dim)
-
         # self.null_kv = nn.Parameter(torch.randn(2, dim_head))
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, dim_head * 2, bias=False)
-
         self.q_scale = nn.Parameter(torch.ones(dim_head))
         self.k_scale = nn.Parameter(torch.ones(dim_head))
-
         self.to_context = nn.Sequential(nn.LayerNorm(pose_dim), nn.Linear(pose_dim, dim_head * 2))
-
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim, bias=False),
             LayerNorm(dim)
@@ -214,7 +199,6 @@ class SelfAttention(nn.Module):
         b, n, device = *x.shape[:2], x.device
         x = self.norm(x)
         q, k, v = (self.to_q(x), *self.to_kv(x).chunk(2, dim=-1))
-
         q = rearrange(q, 'b n (h d) -> b h n d', h=self.heads)
 
         # add null key / value for classifier free guidance in prior net
@@ -228,25 +212,21 @@ class SelfAttention(nn.Module):
         v = torch.cat((cv, v), dim=-2)
 
         # qk rmsnorm
-
         q, k = map(l2norm, (q, k))
         q = q * self.q_scale
         k = k * self.k_scale
 
         # calculate query / key similarities
-
         sim = einsum('b h i d, b j d -> b h i j', q, k) * self.scale
 
         # attention
-
         attn = sim.softmax(dim=-1, dtype=torch.float32)
         attn = attn.to(sim.dtype)
 
         # aggregate values
-
         out = einsum('b h i j, b j d -> b h i d', attn, v)
-
         out = rearrange(out, 'b h n d -> b n (h d)')
+
         return self.to_out(out)
 
 
@@ -297,7 +277,6 @@ class CrossAttention(nn.Module):
         zt = self.norm_zt(zt)
 
         q, k, v = (self.to_q(zt), *self.to_kv(ic).chunk(2, dim=-1))
-
         q = rearrange(q, 'b n (h d) -> b h n d', h=self.heads)
 
         # add null key / value for classifier free guidance in prior net
@@ -306,46 +285,48 @@ class CrossAttention(nn.Module):
         # v = torch.cat((nv, v), dim=-2)
 
         # qk rmsnorm
-
         q, k = map(l2norm, (q, k))
         q = q * self.q_scale
         k = k * self.k_scale
 
         # calculate query / key similarities
-
         sim = einsum('b h i d, b j d -> b h i j', q, k) * self.scale
 
         # attention
-
         attn = sim.softmax(dim=-1, dtype=torch.float32)
         attn = attn.to(sim.dtype)
 
         # aggregate values
-
         out = einsum('b h i j, b j d -> b h i d', attn, v)
-
         out = rearrange(out, 'b h n d -> b n (h d)')
+
         return self.to_out(out)
 
 
 class ResBlockNoAttention(nn.Module):
-
-    def __init__(self, block_channel, clip_dim):
+    def __init__(self, block_channel, clip_dim, input_channel=None):
         super().__init__()
 
         self.film = FiLM(clip_dim, block_channel)
 
-        self.gn1 = nn.GroupNorm(min(32, int(abs(block_channel / 4))), int(block_channel))
+        if input_channel is None:
+            input_channel = block_channel
+
+        self.gn1 = nn.GroupNorm(min(32, int(abs(input_channel / 4))), int(input_channel))
         self.swish1 = nn.SiLU(True)
-        self.conv1 = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
+        self.conv1 = nn.Conv2d(input_channel, block_channel, (3, 3), padding=1)
+
         self.gn2 = nn.GroupNorm(min(32, int(abs(block_channel / 4))), int(block_channel))
         self.swish2 = nn.SiLU(True)
         self.conv2 = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
 
-        self.conv_residual = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
+        self.conv_residual = nn.Conv2d(input_channel, block_channel, (3, 3), padding=1)
 
-    def forward(self, x, clip_embeddings):
+    def forward(self, x, clip_embeddings, unet_residual=None):
         x = self.film(clip_embeddings, x)
+
+        if unet_residual is not None:
+            x = torch.concat((x, unet_residual), dim=1)
 
         h = self.gn1(x)
         h = self.swish1(h)
@@ -360,32 +341,34 @@ class ResBlockNoAttention(nn.Module):
 
 
 class ResBlockAttention(nn.Module):
-
-    def __init__(self, block_channel, clip_dim, hw_dim):
+    def __init__(self, block_channel, clip_dim, hw_dim, input_channel=None):
         super().__init__()
 
         self.block_channel = block_channel
         self.hw_dim = hw_dim
-
         self.film = FiLM(clip_dim, block_channel)
 
-        self.gn1 = nn.GroupNorm(min(32, int(abs(block_channel / 4))), int(block_channel))
+        if input_channel is None:
+            input_channel = block_channel
+
+        self.gn1 = nn.GroupNorm(min(32, int(abs(input_channel / 4))), int(input_channel))
         self.swish1 = nn.SiLU(True)
-        self.conv1 = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
+        self.conv1 = nn.Conv2d(input_channel, block_channel, (3, 3), padding=1)
         self.gn2 = nn.GroupNorm(min(32, int(abs(block_channel / 4))), int(block_channel))
         self.swish2 = nn.SiLU(True)
         self.conv2 = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
-
-        self.conv_residual = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
-
+        self.conv_residual = nn.Conv2d(input_channel, block_channel, (3, 3), padding=1)
         att_dim = (hw_dim // 2) ** 2
+
         # pose vector length will be same as clip pooled length
         self.self_attention = SelfAttention(dim=att_dim, pose_dim=clip_dim)
-
         self.cross_attention = CrossAttention(zt_dim=att_dim, ic_dim=att_dim)
 
-    def forward(self, x, clip_embeddings, pose_embed, garment_embed):
+    def forward(self, x, clip_embeddings, pose_embed, garment_embed, unet_residual=None):
         x = self.film(clip_embeddings, x)
+
+        if unet_residual is not None:
+            x = torch.concat((x, unet_residual), dim=1)
 
         h = self.gn1(x)
         h = self.swish1(h)
@@ -393,7 +376,6 @@ class ResBlockAttention(nn.Module):
         h = self.gn2(h)
         h = self.swish2(h)
         h = self.conv2(h)
-
         h += self.conv_residual(x)
 
         # self attention with pose embed concat with key value
@@ -403,7 +385,6 @@ class ResBlockAttention(nn.Module):
         # cross attention with query from zt and key value from ic
         garment_embed = rearrange(garment_embed, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
         h = self.cross_attention(h, garment_embed)
-
         h = rearrange(h, "b (c p1 p2) (h w) -> b c (h p1) (w p2)",
                       c=self.block_channel, p1=2, p2=2, h=self.hw_dim // 2, w=self.hw_dim // 2)
 
@@ -411,41 +392,45 @@ class ResBlockAttention(nn.Module):
 
 
 class UNetBlockNoAttention(nn.Module):
-
-    def __init__(self, block_channel, clip_dim, res_blocks_number):
+    def __init__(self, block_channel, clip_dim, res_blocks_number, input_channel=None):
         super().__init__()
         self.blocks = nn.ModuleList([])
-        for block in range(res_blocks_number):
-            self.blocks.append(ResBlockNoAttention(block_channel, clip_dim))
+        for idx, block in enumerate(range(res_blocks_number)):
+            if idx != 0:
+                input_channel = None
+            self.blocks.append(ResBlockNoAttention(block_channel, clip_dim, input_channel=input_channel))
 
-    def forward(self, x, clip_embeddings):
+    def forward(self, x, clip_embeddings, unet_residual=None):
         for idx, block in enumerate(self.blocks):
-            x = block(x, clip_embeddings)
+            if idx != 0:
+                unet_residual = None
+            x = block(x, clip_embeddings, unet_residual)
         return x
 
 
 class UNetBlockAttention(nn.Module):
-
     def __init__(self,
                  block_channel,
                  clip_dim,
                  res_blocks_number,
-                 hw_dim):
+                 hw_dim,
+                 input_channel=None):
         super().__init__()
         self.blocks = nn.ModuleList([])
-        for block in range(res_blocks_number):
-            self.blocks.append(ResBlockAttention(block_channel,
-                                                 clip_dim,
-                                                 hw_dim))
+        for idx, block in enumerate(range(res_blocks_number)):
+            if idx != 0:
+                input_channel = None
+            self.blocks.append(ResBlockAttention(block_channel, clip_dim, hw_dim, input_channel=input_channel))
 
-    def forward(self, x, clip_embeddings, pose_embed, garment_embed):
+    def forward(self, x, clip_embeddings, pose_embed, garment_embed, unet_residual=None):
         for idx, block in enumerate(self.blocks):
-            x = block(x, clip_embeddings, pose_embed, garment_embed)
+            if idx != 0:
+                unet_residual = None
+            x = block(x, clip_embeddings, pose_embed, garment_embed, unet_residual)
         return x
 
 
 class SRBlock(nn.Module):
-
     def __init__(self, block_channel, res_blocks_number):
         super().__init__()
         # self.blocks = nn.ModuleList([])

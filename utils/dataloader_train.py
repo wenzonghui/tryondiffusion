@@ -26,7 +26,7 @@ class ToPaddedTensorImages:
         else:
             padding = (0, 0, 0, 0)
 
-        img = F.pad(img, padding, "constant", 255)
+        img = F.pad(img, padding, "constant", 0)
 
         return img
 
@@ -38,12 +38,14 @@ class ToTensorEmbed:
 
 
 class UNetDataset(Dataset):
-    """ This class is to be used while training, where all the conditional inputs and ground truth is pre-saved and are pre-processed."""
+    """ This class is to be used while training, where all the conditional inputs and ground
+     truth is pre-saved and are pre-processed."""
 
     def __init__(self, ip_dir, jp_dir, jg_dir, ia_dir, ic_dir, unet_size):
         """
         Get all the inputs from ../data directory in the main project directory
-        :param ip_dir: Image of target person with source clothing on. Later to be used to generate zt and to be used as ground truth for training.
+        :param ip_dir: Image of target person with source clothing on. Later
+        to be used to generate zt and to be used as ground truth for training.
         :param jp_dir: person pose embeddings from ip
         :param jg_dir: garment pose embeddings from 'ig', ig is the source garment image
         :param ia_dir: clothing agnostic rgb from ip
