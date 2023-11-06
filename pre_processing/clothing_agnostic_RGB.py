@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     from utils.utils import read_img, write_img
 
-    img = read_img("./data/person/00000_00.jpg")
+    img = read_img("data/ip/00000_00.jpg")
     img_agnostic_parse_map = read_img("./data/image-parse-agnostic-v3.2/00000_00.png")
 
     rgb_agnostic = generate_rgb_agnostic(img, img_agnostic_parse_map)

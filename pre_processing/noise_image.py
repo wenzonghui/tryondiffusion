@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
     from utils.utils import read_img, write_img
 
-    img = read_img("./data/person/00000_00.jpg")
+    img = read_img("data/ip/00000_00.jpg")
 
     segmented_garment = add_gaussian_blur(img)
 

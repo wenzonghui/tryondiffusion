@@ -8,7 +8,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 import cv2
 import numpy as np
-from network import UNet128, UNet256
+from UNet128 import UNet128
+from UNet256 import UNet256
 from utils.utils import mk_folders, GaussianSmoothing
 from utils.dataloader_train import UNetDataset
 from ema import EMA
