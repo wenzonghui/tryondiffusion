@@ -8,8 +8,7 @@
 import torch
 from torch import nn
 
-from network_elem import UNetBlockNoAttention, DownSample, UNetBlockAttention, UpSample, SinusoidalPosEmbed, \
-    AttentionPool1d
+from network_elem import UNetBlockNoAttention, DownSample, UNetBlockAttention, UpSample, SinusoidalPosEmbed, AttentionPool1d
 
 
 class UNet128(nn.Module):
@@ -115,11 +114,12 @@ class UNet128(nn.Module):
 
         pos_encoding = self.pos_encod_layer(time_step)
 
-        # concat pose embeddings
         pose_embeddings = torch.concat((person_pose_embedding[:, None, :], garment_pose_embedding[:, None, :]), dim=1)
+        print("pose_embeddings shape: ", pose_embeddings.shape)
 
         # get clip embeddings
         clip_embedding = self.attn_pool_layer(pose_embeddings, time_step, noise_level)
+        print("clip_embedding shape: ", clip_embedding.shape)
 
         # passing through initial conv layer: ic
         # out: 128 * 128 * 128

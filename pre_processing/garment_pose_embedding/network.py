@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 
@@ -6,7 +7,7 @@ class AutoEncoder(nn.Module):
     def __init__(self, inp):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(inp, 16),
+            nn.Linear(inp, 16),  # inp = 20
             nn.ReLU(True),
             nn.Linear(16, 8),
             nn.ReLU(True)
@@ -21,6 +22,7 @@ class AutoEncoder(nn.Module):
     def forward(self, x):
         embeddings = self.encoder(x)
         prediction = self.decoder(embeddings)
+
         return prediction, embeddings
 
 

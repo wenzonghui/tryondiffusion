@@ -13,3 +13,5 @@ Ip --> Ia
 Ig --> Ic
 
 ## Zt: Noisy image
+Ip --> Zt
+Zt concat Ia --> Zt

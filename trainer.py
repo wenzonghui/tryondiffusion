@@ -4,7 +4,7 @@ from diffusion import Diffusion
 class ArgParser:
 
     def __init__(self):
-        self.run_name = "1"
+        self.run_name = "unet128"
 
         self.train_ip_folder = "data/train/ip"  # 处理后变成zt
         self.train_jp_folder = "data/train/jp"
@@ -18,7 +18,7 @@ class ArgParser:
         self.validation_ic_folder = "data/val/ic"
         self.validation_jg_folder = "data/val/jg"
 
-        self.batch_size_train = 1
+        self.batch_size_train = 8
         self.batch_size_validation = 1
 
         self.calculate_loss_frequency = 10
@@ -32,15 +32,16 @@ class ArgParser:
         self.pct_increasing_lr = 0.02
 
 
-args = ArgParser()
-diffusion = Diffusion(device="cuda",
-                      pose_embed_dim=8,
-                      time_steps=256,
-                      beta_start=1e-4,
-                      beta_end=0.02,
-                      unet_dim=64,
-                      noise_input_channel=3,
-                      beta_ema=0.995)
+if __name__ == "__main__":
+    args = ArgParser()
+    diffusion = Diffusion(device="cuda",
+                          pose_embed_dim=8,
+                          time_steps=256,
+                          beta_start=1e-4,
+                          beta_end=0.02,
+                          unet_dim=128,
+                          noise_input_channel=3,
+                          beta_ema=0.995)
 
-diffusion.prepare(args)
-diffusion.fit(args)
+    diffusion.prepare(args)
+    diffusion.fit(args)

@@ -1,13 +1,102 @@
 import os
+import cv2
 import torch
+import json
+import math
+import numbers
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torch.nn import functional as F
 from torchvision import transforms as T
-from utils import load_pose_embed, read_img
+
+
+def read_img(img_path):
+    img = cv2.imread(img_path)
+    return img
+
+
+def write_img(img, folder_path, img_name):
+    path = os.path.join(folder_path, img_name)
+    cv2.imwrite(path, img)
+
+
+class GaussianSmoothing(nn.Module):
+    """
+    Source: https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/10?u=tanay_agrawal
+    Apply gaussian smoothing on a
+    1d, 2d or 3d tensor. Filtering is performed seperately for each channel
+    in the input using a depthwise convolution.
+    Arguments:
+        channels (int, sequence): Number of channels of the input tensors. Output will
+            have this number of channels as well.
+        kernel_size (int, sequence): Size of the gaussian kernel.
+        sigma (float, sequence): Standard deviation of the gaussian kernel.
+        dim (int, optional): The number of dimensions of the data.
+            Default value is 2 (spatial).
+    """
+
+    def __init__(self, channels, kernel_size, sigma, conv_dim):
+        super(GaussianSmoothing, self).__init__()
+        if isinstance(kernel_size, numbers.Number):
+            kernel_size = [kernel_size] * conv_dim
+        if isinstance(sigma, numbers.Number):
+            sigma = [sigma] * conv_dim
+
+        # The gaussian kernel is the product of the
+        # gaussian function of each dimension.
+        kernel = 1
+        meshgrids = torch.meshgrid(
+            [
+                torch.arange(size, dtype=torch.float32)
+                for size in kernel_size
+            ]
+        )
+        for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
+            mean = (size - 1) / 2
+            kernel *= 1 / (std * math.sqrt(2 * math.pi)) * \
+                      torch.exp(-((mgrid - mean) / std) ** 2 / 2)
+
+        # Make sure sum of values in gaussian kernel equals 1.
+        kernel = kernel / torch.sum(kernel)
+
+        # Reshape to depthwise convolutional weight
+        kernel = kernel.view(1, 1, *kernel.size())
+        kernel = kernel.repeat(channels, *[1] * (kernel.dim() - 1))
+
+        self.register_buffer('weight', kernel)
+        self.groups = channels
+
+        if conv_dim == 1:
+            self.conv = F.conv1d
+        elif conv_dim == 2:
+            self.conv = F.conv2d
+        elif conv_dim == 3:
+            self.conv = F.conv3d
+        else:
+            raise RuntimeError(
+                'Only 1, 2 and 3 dimensions are supported. Received {}.'.format(conv_dim)
+            )
+
+    def forward(self, input):
+        """
+        Apply gaussian filter to input.
+        Arguments:
+            input (torch.Tensor): Input to apply gaussian filter on.
+        Returns:
+            filtered (torch.Tensor): Filtered output.
+        """
+        return self.conv(input, weight=self.weight, groups=self.groups)
+
+
+def mk_folders(run_name):
+    os.makedirs("models", exist_ok=True)
+    os.makedirs("results", exist_ok=True)
+    os.makedirs(os.path.join("models", run_name), exist_ok=True)
+    os.makedirs(os.path.join("results", run_name), exist_ok=True)
+    os.makedirs(os.path.join("results", run_name, "images"), exist_ok=True)
 
 
 class ToPaddedTensorImages:
-
     def __call__(self, image):
         """Padding image so that aspect ratio is maintained.
         And converting numpy arrays to tensors."""
@@ -32,9 +121,46 @@ class ToPaddedTensorImages:
 
 
 class ToTensorEmbed:
-
     def __call__(self, pose_embed):
         return torch.from_numpy(pose_embed)
+
+
+# def person_pose_json_to_embedding(jp):
+#     # 对 jp 进行转换为 embedding
+#     person_pose_embedding_dir = '/home/xkmb/下载/tryondiffusion/data/train/jp_embed/best_model.pth'
+#
+#     model = PersonAutoEncoder(50)  # 导入网络结构
+#     device = torch.device("CUDA:1")
+#     model.load_state_dict(torch.load(person_pose_embedding_dir, map_location=device))
+#
+#     with open(jp, 'r') as jp:
+#         jp_json = json.load(jp)
+#     jp_tensor = torch.tensor(jp_json)
+#
+#     print("jp type: ", type(jp_tensor))
+#     print("jp: ", jp_tensor)
+#     jp = model(jp_tensor)
+#
+#     return jp
+
+
+# def garment_pose_json_to_embedding(jg):
+#     # 对 jg 进行转换为 embedding
+#     garment_pose_embedding_dir = '/home/xkmb/下载/tryondiffusion/data/train/jg_embed/best_model.pth'
+#
+#     model = GarmentAutoEncoder(20)  # 导入网络结构
+#     device = torch.device("CUDA:1")
+#     model.load_state_dict(torch.load(garment_pose_embedding_dir, map_location=device))
+#
+#     with open(jg, 'r') as jg:
+#         jg_json = json.load(jg)
+#     jg_tensor = torch.tensor(jg_json)
+#
+#     print("jg type: ", type(jg_tensor))
+#     print("jg: ", jg_tensor)
+#     jg = model(jg_tensor)
+#
+#     return jg
 
 
 class UNetDataset(Dataset):
@@ -77,11 +203,12 @@ class UNetDataset(Dataset):
 
     def __getitem__(self, item):
         ip = read_img(self.ip_paths[item])
-        jp = load_pose_embed(self.jp_paths[item])
-        jg = load_pose_embed(self.jg_paths[item])
+        # jp = load_person_pose_embed(person_pose_json_to_embedding(self.jp_paths[item]))
+        # jg = load_garment_pose_embed(garment_pose_json_to_embedding(self.jg_paths[item]))
+        jp = self.jp_paths[item]
+        jg = self.jg_paths[item]
         ia = read_img(self.ia_paths[item])
         ic = read_img(self.ic_paths[item])
-
         ip = self.transforms_imgs(ip)
         ia = self.transforms_imgs(ia)
         ic = self.transforms_imgs(ic)

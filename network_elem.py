@@ -89,9 +89,9 @@ class AttentionPool1d(nn.Module):
     def forward(self, x, time_step, noise_level=0.3):
         # if x in format NCP
         # N - Batch Dimension, P - Pose Dimension, C - No. of pose(person and garment)
-        x = x.permute(1, 0, 2)
+        x = x.permute(1, 0, 2).to('cuda')
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (C+1)NP
-        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (C+1)NP
+        x = x + self.positional_embedding[:, None, :].to(x.dtype).to('cuda')  # (C+1)NP
         batch_size = x.shape[1]
         x, _ = F.multi_head_attention_forward(
             query=x[:1], key=x, value=x,

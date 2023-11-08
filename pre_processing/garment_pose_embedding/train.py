@@ -49,14 +49,14 @@ def train(train_dir,
             if not num_batches % 125:
                 print(f"Running Loss; Iteration: {num_batches}, Train Loss: {(train_running_loss / num_batches):.4f}")
 
-        print(f"Epoch: {epoch + 1}/{num_epochs}, Train Loss: {(train_running_loss / num_batches):.4f}")
+        print(f"Epoch: {epoch + 1}/{num_epochs}, Train Loss: {(train_running_loss / num_batches):.4f}\n")
         writer.add_scalar("Epoch_Loss/Train", train_running_loss / num_batches, epoch + 1)
 
         # validation
         test_running_loss = 0
         num_test_batches = 0
 
-        for test_keypoints in test_dataloader:
+        for test_keypoints, _ in test_dataloader:
             model.eval()
             test_predictions, _ = model(test_keypoints)
             test_loss = criterion(test_predictions, test_keypoints)
@@ -83,6 +83,6 @@ def train(train_dir,
 
 
 if __name__ == "__main__":
-    train(train_dir="../data/train",
-          test_dir="../data/test",
-          num_epochs=200)
+    train(train_dir="../../data/train/jg",
+          test_dir="../../data/val/jg",
+          num_epochs=300)
