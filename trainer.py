@@ -21,11 +21,13 @@ class ArgParser:
         self.batch_size_train = 1
         self.batch_size_validation = 1
 
+        # 保存频率，几个 epoch 保存一次
         self.calculate_loss_frequency = 1
         self.image_logging_frequency = 1
         self.model_saving_frequency = 1
 
-        self.total_steps = 100000
+        self.epochs = 100
+        self.data_len = 11633
         self.lr = 0.0
         self.start_lr = 0.0
         self.stop_lr = 0.0001

@@ -2,6 +2,8 @@ import copy
 import json
 import logging
 import os
+import time
+
 import torch
 from torch.utils.data import DataLoader
 from torch import optim
@@ -65,9 +67,6 @@ class Diffusion:
         self.unet_dim = unet_dim
         self.beta_ema = beta_ema
         self.device = device
-        self.current_epoch = 0
-        self.epochs = 1
-        # self.device1 = "cuda"
 
         if unet_dim == 128:
             self.net = UNet128(pose_embed_dim, device, time_steps).to(device)
@@ -170,7 +169,8 @@ class Diffusion:
         # give args.batch_size_validation 1 while training
         self.val_dataloader = DataLoader(validation_dataset, args.batch_size_validation, shuffle=True)
         self.optimizer = optim.AdamW(self.net.parameters(), lr=args.lr, eps=1e-4)
-        self.scheduler = schedule_lr(total_steps=args.total_steps, start_lr=args.start_lr, stop_lr=args.stop_lr,
+        self.scheduler = schedule_lr(total_steps=round((args.data_len * args.epochs) / args.batch_size_train),
+                                     start_lr=args.start_lr, stop_lr=args.stop_lr,
                                      pct_increasing_lr=args.pct_increasing_lr)
         self.mse = nn.MSELoss()
         self.ema = EMA(self.beta_ema)
@@ -188,16 +188,27 @@ class Diffusion:
             g['lr'] = self.scheduler[running_step]
 
     # 处理一个训练/验证周期，并可以选择性的打印出损失
-    def single_epoch(self, train=True):
+    def single_epoch(self, epoch=-1, epochs=-1, every_epoch_steps=-1, train=True):
         avg_loss = 0.
 
         if train:
             self.net.train()
-            print(f"Epoch: {self.current_epoch+1} / {self.epochs}")
+
         else:
             self.net.eval()
 
         for ip, jp, jg, ia, ic in self.train_dataloader:
+
+            # 训练过程中打印步数
+            print("Epoch: " + str(epoch) + "/" + str(epochs) + " ::: " + "Step: " + str(
+                self.running_train_steps) + "/" + str(every_epoch_steps))
+            # self.save_models(0)
+
+            # 这里是针对每个 epoch 过大，在中间 10% 进行一步模型权重存储临时使用
+            if self.running_train_steps == round(0.01 * every_epoch_steps):
+                print("Now save checkpoints.")
+                self.save_models(0)
+
             # noise augmentation
             # 在任何其他处理之前，向 ia、ic 添加随机高斯噪声进行噪声增强
             sigma = float(torch.FloatTensor(1).uniform_(0.4, 0.6))
@@ -303,23 +314,33 @@ class Diffusion:
 
         logging.info(f"Starting training")
 
-        data_len = len(self.train_dataloader)
-        self.epochs = round((args.total_steps * args.batch_size_train) / data_len)
-        print("args.total_steps: ", args.total_steps)
+        print("args.total_steps: ", round((args.data_len * args.epochs) / args.batch_size_train))
         print("args.batch_size_train: ", args.batch_size_train)
-        print("data_len: ", data_len)
-        print("(args.total_steps * args.batch_size_train) / data_len = ", self.epochs)
-        print("\nEpochs: ", self.epochs)
+        print("data_len: ", args.data_len)
+        print("\nEpochs: ", args.epochs)
 
-        if self.epochs < 0:
-            self.epochs = 1
+        if args.epochs < 0:
+            args.epochs = 1
 
         self.running_train_steps = 0
+        # 每一个 epoch 包含多少 steps
+        every_epoch_steps = round(args.data_len / args.batch_size_train)
+        print("Every epoch steps: ", every_epoch_steps)
 
-        for epoch in range(self.epochs):
-            logging.info(f"Starting Epoch: {epoch + 1}")
-            self.current_epoch = epoch
-            _ = self.single_epoch(train=True)
+        for epoch in range(args.epochs):
+            print(f"\nStarting Epoch: {epoch + 1} / {args.epochs}")
+            start_time = time.time()
+            _ = self.single_epoch(epoch, args.epochs, every_epoch_steps, train=True)
+            end_time = time.time()
+
+            # Calculate the total execution time in seconds
+            total_time = end_time - start_time
+
+            # Convert the time into hours, minutes, and seconds
+            hours = int(total_time // 3600)
+            minutes = int((total_time % 3600) // 60)
+            seconds = total_time % 60
+            print(f"Epoch Execution Time: {hours} hours, {minutes} minutes, and {seconds:.2f} seconds")
 
             if (epoch + 1) % args.calculate_loss_frequency == 0:
                 avg_loss = self.single_epoch(train=False)
