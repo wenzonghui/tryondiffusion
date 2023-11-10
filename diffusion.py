@@ -65,6 +65,8 @@ class Diffusion:
         self.unet_dim = unet_dim
         self.beta_ema = beta_ema
         self.device = device
+        self.current_epoch = 0
+        self.epochs = 1
         # self.device1 = "cuda"
 
         if unet_dim == 128:
@@ -74,10 +76,10 @@ class Diffusion:
 
         self.fc1 = PersonAutoEncoder(50)
         self.fc1.load_state_dict(
-            torch.load('/home/xkmb/下载/tryondiffusion/data/train/jp_embed/best_model.pth', map_location=self.device))
+            torch.load('/home/xkmb/tryondiffusion/data/train/jp_embed/best_model.pth', map_location=self.device))
         self.fc2 = GarmentAutoEncoder(20)
         self.fc2.load_state_dict(
-            torch.load('/home/xkmb/下载/tryondiffusion/data/train/jg_embed/best_model.pth', map_location=self.device))
+            torch.load('/home/xkmb/tryondiffusion/data/train/jg_embed/best_model.pth', map_location=self.device))
 
         self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
 
@@ -191,6 +193,7 @@ class Diffusion:
 
         if train:
             self.net.train()
+            print(f"Epoch: {self.current_epoch+1} / {self.epochs}")
         else:
             self.net.eval()
 
@@ -212,8 +215,9 @@ class Diffusion:
                         jp_json = json.load(jp_item)
                         jp_data.append(jp_json)
                 jp_tensor = torch.tensor(jp_data)
-                jp = self.fc1(jp_tensor)
-                jp = torch.tensor(jp[1]).to(self.device)
+                jp_fc1 = self.fc1(jp_tensor)
+                # jp = torch.tensor(jp_fc1[1]).to(self.device) # 换下面这种写法
+                jp = jp_fc1[1].clone().detach().to(self.device)
                 # jp = jp.cpu().to(self.device)
 
                 jg_data = []
@@ -222,8 +226,9 @@ class Diffusion:
                         jg_json = json.load(jg_item)
                         jg_data.append(jg_json)
                 jg_tensor = torch.tensor(jg_data)
-                jg = self.fc2(jg_tensor)
-                jg = torch.tensor(jg[1]).to(self.device)
+                jg_fc2 = self.fc2(jg_tensor)
+                # jg = torch.tensor(jg_fc2[1]).to(self.device) # 换下面这种写法
+                jg = jg_fc2[1].clone().detach().to(self.device)
                 # jg = jg.cpu().to(self.device)
 
                 ia = ia.to(self.device)
@@ -299,20 +304,21 @@ class Diffusion:
         logging.info(f"Starting training")
 
         data_len = len(self.train_dataloader)
-        epochs = round((args.total_steps * args.batch_size_train) / data_len)
+        self.epochs = round((args.total_steps * args.batch_size_train) / data_len)
         print("args.total_steps: ", args.total_steps)
         print("args.batch_size_train: ", args.batch_size_train)
         print("data_len: ", data_len)
-        print("(args.total_steps * args.batch_size_train) / data_len = ", epochs)
-        print("epochs: ", epochs)
+        print("(args.total_steps * args.batch_size_train) / data_len = ", self.epochs)
+        print("\nEpochs: ", self.epochs)
 
-        if epochs < 0:
-            epochs = 1
+        if self.epochs < 0:
+            self.epochs = 1
 
         self.running_train_steps = 0
 
-        for epoch in range(epochs):
+        for epoch in range(self.epochs):
             logging.info(f"Starting Epoch: {epoch + 1}")
+            self.current_epoch = epoch
             _ = self.single_epoch(train=True)
 
             if (epoch + 1) % args.calculate_loss_frequency == 0:

@@ -115,117 +115,117 @@ class UNet128(nn.Module):
         pos_encoding = self.pos_encod_layer(time_step)
 
         pose_embeddings = torch.concat((person_pose_embedding[:, None, :], garment_pose_embedding[:, None, :]), dim=1)
-        print("pose_embeddings shape: ", pose_embeddings.shape)
+        # print("pose_embeddings shape: ", pose_embeddings.shape)
 
         # get clip embeddings
         clip_embedding = self.attn_pool_layer(pose_embeddings, time_step, noise_level)
-        print("clip_embedding shape: ", clip_embedding.shape)
+        # print("clip_embedding shape: ", clip_embedding.shape)
 
         # passing through initial conv layer: ic
         # out: 128 * 128 * 128
         ic_init = self.init_conv_garment(ic)
-        print('ic_init: ', ic_init.size())
+        # print('ic_init: ', ic_init.size())
 
         # passing through initial conv layer: zt
         # out: 128 * 128 * 128
         zt_init = self.init_conv_person(zt)
-        print('zt_init: ', zt_init.size())
+        # print('zt_init: ', zt_init.size())
 
         # entering UNet
         # 128 - garment
         # out: 128 * 128 * 128
         ic_128 = self.block1_garment(ic_init, clip_embedding)
-        print('ic_128: ', ic_128.size())
+        # print('ic_128: ', ic_128.size())
 
         # 128 - person
         # out: 128 * 128 * 128
         zt_128_1 = self.block1_person(zt_init, clip_embedding)
-        print('zt_128_1: ', zt_128_1.size())
+        # print('zt_128_1: ', zt_128_1.size())
 
         # 64 - garment
         # out: 64 * 64 * 256
         ic_64_downsample = self.downsample1_garment(ic_128, pos_encoding)
         ic_64 = self.block2_garment(ic_64_downsample, clip_embedding)
-        print('ic_64_downsample: ', ic_64_downsample.size())
-        print('ic_64: ', ic_64.size())
+        # print('ic_64_downsample: ', ic_64_downsample.size())
+        # print('ic_64: ', ic_64.size())
 
         # 64 - person:
         # out: 64 * 64 * 256
         zt_64_1_downsample = self.downsample1_person(zt_128_1, pos_encoding)
         zt_64_1 = self.block2_person(zt_64_1_downsample, clip_embedding)
-        print('zt_64_1_downsample: ', zt_64_1_downsample.size())
-        print('zt_64_1: ', zt_64_1.size())
+        # print('zt_64_1_downsample: ', zt_64_1_downsample.size())
+        # print('zt_64_1: ', zt_64_1.size())
 
         # 32 - garment
         # out: 32 * 32 * 512
         ic_32_1_downsample = self.downsample2_garment(ic_64, pos_encoding)
         ic_32_1 = self.block3_garment(ic_32_1_downsample, clip_embedding)
-        print('ic_32_1_downsample: ', ic_32_1_downsample.size())
-        print('ic_32_1: ', ic_32_1.size())
+        # print('ic_32_1_downsample: ', ic_32_1_downsample.size())
+        # print('ic_32_1: ', ic_32_1.size())
 
         # 32 - person
         # out: 32 * 32 * 512
         zt_32_1_downsample = self.downsample2_person(zt_64_1, pos_encoding)
         zt_32_1 = self.block3_person(zt_32_1_downsample, clip_embedding, pose_embeddings, ic_32_1)
-        print('zt_32_1_downsample: ', zt_32_1_downsample.size())
-        print('zt_32_1: ', zt_32_1.size())
+        # print('zt_32_1_downsample: ', zt_32_1_downsample.size())
+        # print('zt_32_1: ', zt_32_1.size())
 
         # 16 - garment
         # out: 16 * 16 * 1024
         ic_16_1_downsample = self.downsample3_garment(ic_32_1, pos_encoding)
         ic_16_1 = self.block4_garment(ic_16_1_downsample, clip_embedding)
-        print('ic_16_1_downsample: ', ic_16_1_downsample.size())
-        print('ic_16_1: ', ic_16_1.size())
+        # print('ic_16_1_downsample: ', ic_16_1_downsample.size())
+        # print('ic_16_1: ', ic_16_1.size())
 
         # 16 - person
         # out: 16 * 16 * 1024
         zt_16_1_downsample = self.downsample3_person(zt_32_1, pos_encoding)
         zt_16_1 = self.block4_person(zt_16_1_downsample, clip_embedding, pose_embeddings, ic_16_1)
-        print('zt_16_1_downsample: ', zt_16_1_downsample.size())
-        print('zt_16_1: ', zt_16_1.size())
+        # print('zt_16_1_downsample: ', zt_16_1_downsample.size())
+        # print('zt_16_1: ', zt_16_1.size())
 
         # --------------------------------------------- 右边一半 ---------------------------------------------
         # 16 - garment
         # out: 16 * 16 * 1024
         ic_16_2 = self.block5_garment(ic_16_1, clip_embedding, ic_16_1)
-        print('ic_16_2: ', ic_16_2.size())
+        # print('ic_16_2: ', ic_16_2.size())
 
         # 16 - person
         # out: 16 * 16 * 1024
         zt_16_2 = self.block5_person(zt_16_1, clip_embedding, pose_embeddings, ic_16_2, zt_16_1)
-        print('zt_16_2: ', zt_16_2.size())
+        # print('zt_16_2: ', zt_16_2.size())
 
         # 32 - garment
         # out: 32 * 32 * 512
         ic_32_2_upsample = self.upsample1_garment(ic_16_2, pos_encoding)
         ic_32_2 = self.block6_garment(ic_32_2_upsample, clip_embedding, ic_32_1)
-        print('ic_32_2_upsample: ', ic_32_2_upsample.size())
-        print('ic_32_2: ', ic_32_2.size())
+        # print('ic_32_2_upsample: ', ic_32_2_upsample.size())
+        # print('ic_32_2: ', ic_32_2.size())
 
         # 32 - person
         # out: 32 * 32 * 512
         zt_32_2_upsample = self.upsample1_person(zt_16_2, pos_encoding)
         zt_32_2 = self.block6_person(zt_32_2_upsample, clip_embedding, pose_embeddings, ic_32_2, zt_32_1)
-        print('zt_32_2_upsample: ', zt_32_2_upsample.size())
-        print('zt_32_2: ', zt_32_2.size())
+        # print('zt_32_2_upsample: ', zt_32_2_upsample.size())
+        # print('zt_32_2: ', zt_32_2.size())
 
         # 64 - person
         # out: 64 * 64 * 256
         zt_64_2_upsample = self.upsample2_person(zt_32_2, pos_encoding)
         zt_64_2 = self.block7_person(zt_64_2_upsample, clip_embedding, zt_64_1)
-        print('zt_64_2_upsample: ', zt_64_2_upsample.size())
-        print('zt_64_2: ', zt_64_2.size())
+        # print('zt_64_2_upsample: ', zt_64_2_upsample.size())
+        # print('zt_64_2: ', zt_64_2.size())
 
         # 128 - person
         # out: 128 * 128 * 128
         zt_128_2_upsample = self.upsample3_person(zt_64_2, pos_encoding)
         zt_128_2 = self.block8_person(zt_128_2_upsample, clip_embedding, zt_128_1)
-        print('zt_128_2_upsample: ', zt_128_2_upsample.size())
-        print('zt_128_2: ', zt_128_2.size())
+        # print('zt_128_2_upsample: ', zt_128_2_upsample.size())
+        # print('zt_128_2: ', zt_128_2.size())
 
         # final conv layer - person
         zt_final = self.final_conv_person(zt_128_2)
-        print('zt_final: ', zt_final.size())
+        # print('zt_final: ', zt_final.size())
 
         return zt_final
 

@@ -18,12 +18,12 @@ class ArgParser:
         self.validation_ic_folder = "data/val/ic"
         self.validation_jg_folder = "data/val/jg"
 
-        self.batch_size_train = 8
+        self.batch_size_train = 1
         self.batch_size_validation = 1
 
-        self.calculate_loss_frequency = 10
-        self.image_logging_frequency = 10
-        self.model_saving_frequency = 10
+        self.calculate_loss_frequency = 1
+        self.image_logging_frequency = 1
+        self.model_saving_frequency = 1
 
         self.total_steps = 100000
         self.lr = 0.0
