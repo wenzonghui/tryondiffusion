@@ -9,11 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn import functional as F
 from torchvision import transforms as T
 
-
-def read_img(img_path):
-    img = cv2.imread(img_path)
-    return img
-
+from utils.utils import load_pose_embed
 
 def write_img(img, folder_path, img_name):
     path = os.path.join(folder_path, img_name)
@@ -54,7 +50,7 @@ class GaussianSmoothing(nn.Module):
         for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
             mean = (size - 1) / 2
             kernel *= 1 / (std * math.sqrt(2 * math.pi)) * \
-                      torch.exp(-((mgrid - mean) / std) ** 2 / 2)
+                torch.exp(-((mgrid - mean) / std) ** 2 / 2)
 
         # Make sure sum of values in gaussian kernel equals 1.
         kernel = kernel / torch.sum(kernel)
@@ -74,7 +70,8 @@ class GaussianSmoothing(nn.Module):
             self.conv = F.conv3d
         else:
             raise RuntimeError(
-                'Only 1, 2 and 3 dimensions are supported. Received {}.'.format(conv_dim)
+                'Only 1, 2 and 3 dimensions are supported. Received {}.'.format(
+                    conv_dim)
             )
 
     def forward(self, input):
@@ -125,49 +122,20 @@ class ToTensorEmbed:
         return torch.from_numpy(pose_embed)
 
 
-# def person_pose_json_to_embedding(jp):
-#     # 对 jp 进行转换为 embedding
-#     person_pose_embedding_dir = '/home/xkmb/下载/tryondiffusion/data/train/jp_embed/best_model.pth'
-#
-#     model = PersonAutoEncoder(50)  # 导入网络结构
-#     device = torch.device("CUDA:1")
-#     model.load_state_dict(torch.load(person_pose_embedding_dir, map_location=device))
-#
-#     with open(jp, 'r') as jp:
-#         jp_json = json.load(jp)
-#     jp_tensor = torch.tensor(jp_json)
-#
-#     print("jp type: ", type(jp_tensor))
-#     print("jp: ", jp_tensor)
-#     jp = model(jp_tensor)
-#
-#     return jp
-
-
-# def garment_pose_json_to_embedding(jg):
-#     # 对 jg 进行转换为 embedding
-#     garment_pose_embedding_dir = '/home/xkmb/下载/tryondiffusion/data/train/jg_embed/best_model.pth'
-#
-#     model = GarmentAutoEncoder(20)  # 导入网络结构
-#     device = torch.device("CUDA:1")
-#     model.load_state_dict(torch.load(garment_pose_embedding_dir, map_location=device))
-#
-#     with open(jg, 'r') as jg:
-#         jg_json = json.load(jg)
-#     jg_tensor = torch.tensor(jg_json)
-#
-#     print("jg type: ", type(jg_tensor))
-#     print("jg: ", jg_tensor)
-#     jg = model(jg_tensor)
-#
-#     return jg
+def create_transforms_imgs(image, unet_size):
+    transforms = T.Compose([
+        ToPaddedTensorImages(),  # 假设这个函数可以直接应用于图像
+        T.Resize(unet_size),
+        T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+    return transforms(image)
 
 
 class UNetDataset(Dataset):
     """ This class is to be used while training, where all the conditional inputs and ground
      truth is pre-saved and are pre-processed."""
 
-    def __init__(self, ip_dir, jp_dir, jg_dir, ia_dir, ic_dir, unet_size):
+    def __init__(self, ip_dir, jp_dir, jg_dir, ia_dir, ic_dir, itr128_dir, unet_size):
         """
         Get all the inputs from ../data directory in the main project directory
         :param ip_dir: Image of target person with source clothing on. Later
@@ -192,6 +160,10 @@ class UNetDataset(Dataset):
         self.ic_list = os.listdir(ic_dir)
         self.ic_paths = [os.path.join(ic_dir, i) for i in self.ic_list]
 
+        self.itr128_list = os.listdir(itr128_dir)
+        self.itr128_paths = [os.path.join(itr128_dir, i)
+                             for i in self.itr128_list]
+
         self.transforms_imgs = T.Compose([
             ToPaddedTensorImages(),
             T.Resize(unet_size),
@@ -201,16 +173,30 @@ class UNetDataset(Dataset):
     def __len__(self):
         return len(self.ip_list)
 
-    def __getitem__(self, item):
-        ip = read_img(self.ip_paths[item])
-        # jp = load_person_pose_embed(person_pose_json_to_embedding(self.jp_paths[item]))
-        # jg = load_garment_pose_embed(garment_pose_json_to_embedding(self.jg_paths[item]))
-        jp = self.jp_paths[item]
-        jg = self.jg_paths[item]
-        ia = read_img(self.ia_paths[item])
-        ic = read_img(self.ic_paths[item])
-        ip = self.transforms_imgs(ip)
-        ia = self.transforms_imgs(ia)
-        ic = self.transforms_imgs(ic)
+    # 原本的写法，返回的直接是对应的元素内容
+    # def __getitem__(self, item):
+    #     jp = load_pose_embed((self.jp_paths[item]))  # 这种是直接得到了 jp 中的数据
+    #     jg = load_pose_embed((self.jg_paths[item]))
 
-        return ip, jp, jg, ia, ic
+    #     ip = read_img(self.ip_paths[item])
+    #     ia = read_img(self.ia_paths[item])
+    #     ic = read_img(self.ic_paths[item])
+    #     itr128 = read_img(self.itr128_paths[item])
+
+    #     ip = self.transforms_imgs(ip)  # 在后面再处理
+    #     ia = self.transforms_imgs(ia) # 在后面再处理
+    #     ic = self.transforms_imgs(ic) # 在后面再处理
+    #     itr128 = self.transforms_imgs(itr128) # 在后面再处理
+
+    # 这种写法只返回对应的文件路径
+    def __getitem__(self, item):
+        jp = self.jp_paths[item]  # 这种只得到了 jp 的文件路径，数据在后面再进行读取
+        jg = self.jg_paths[item]
+
+        ip = self.ip_paths[item]
+        ia = self.ia_paths[item]
+        ic = self.ic_paths[item]
+        itr128 = self.itr128_paths[item]
+
+        # 经过这样处理，返回的全部是文件路径
+        return ip, jp, jg, ia, ic, itr128

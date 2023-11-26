@@ -28,6 +28,6 @@ class AutoEncoder(nn.Module):
         return prediction, embeddings
 
 
-if __name__=="__main__":
-    net = AutoEncoder(50)
+if __name__ == "__main__":
+    net = AutoEncoder(34)
     print(net)

@@ -2,32 +2,32 @@ from diffusion import Diffusion
 
 
 class ArgParser:
-
     def __init__(self):
-        self.run_name = "unet128"
 
-        self.train_ip_folder = "data/train/ip"  # 处理后变成zt
-        self.train_jp_folder = "data/train/jp"
-        self.train_ia_folder = "data/train/ia"
-        self.train_ic_folder = "data/train/ic"
-        self.train_jg_folder = "data/train/jg"
+        self.train_ip_folder = "data_test/train/ip"  # 处理后变成zt
+        self.train_jp_folder = "data_test/train/jp"
+        self.train_ia_folder = "data_test/train/ia"
+        self.train_ic_folder = "data_test/train/ic"
+        self.train_jg_folder = "data_test/train/jg"
+        self.train_itr128_folder = "data_test/train/itr128"
 
-        self.validation_ip_folder = "data/val/ip"  # 处理后变成zt
-        self.validation_jp_folder = "data/val/jp"
-        self.validation_ia_folder = "data/val/ia"
-        self.validation_ic_folder = "data/val/ic"
-        self.validation_jg_folder = "data/val/jg"
+        self.validation_ip_folder = "data_test/val/ip"  # 处理后变成zt
+        self.validation_jp_folder = "data_test/val/jp"
+        self.validation_ia_folder = "data_test/val/ia"
+        self.validation_ic_folder = "data_test/val/ic"
+        self.validation_jg_folder = "data_test/val/jg"
+        self.validation_itr128_folder = "data_test/val/itr128"
 
-        self.batch_size_train = 1
-        self.batch_size_validation = 1
+        self.batch_size_train = 2  # 训练的 batch_size
+        self.batch_size_validation = 1  # 验证的 batch_size
 
         # 保存频率，几个 epoch 保存一次
         self.calculate_loss_frequency = 1
         self.image_logging_frequency = 1
         self.model_saving_frequency = 1
 
-        self.epochs = 100
-        self.data_len = 11633
+        self.epochs = 200
+        self.data_len = 80
         self.lr = 0.0
         self.start_lr = 0.0
         self.stop_lr = 0.0001
@@ -36,12 +36,13 @@ class ArgParser:
 
 if __name__ == "__main__":
     args = ArgParser()
+
     diffusion = Diffusion(device="cuda",
                           pose_embed_dim=8,
                           time_steps=256,
                           beta_start=1e-4,
                           beta_end=0.02,
-                          unet_dim=128,
+                          unet_dim=128,  # 指定训练哪个网络
                           noise_input_channel=3,
                           beta_ema=0.995)
 

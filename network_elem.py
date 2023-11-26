@@ -115,10 +115,7 @@ class AttentionPool1d(nn.Module):
         # x = x.squeeze(0)
         x = x.permute(1, 0, 2)
 
-        smoothing = GaussianSmoothing(channels=1,
-                                      kernel_size=3,
-                                      sigma=noise_level,
-                                      conv_dim=1).to(self.device)
+        smoothing = GaussianSmoothing(channels=1, kernel_size=3, sigma=noise_level, conv_dim=1).to(self.device)
 
         x_noisy = smoothing(F.pad(x, (1, 1), mode='reflect'))
         x = x + x_noisy
@@ -385,8 +382,7 @@ class ResBlockAttention(nn.Module):
         # cross attention with query from zt and key value from ic
         garment_embed = rearrange(garment_embed, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
         h = self.cross_attention(h, garment_embed)
-        h = rearrange(h, "b (c p1 p2) (h w) -> b c (h p1) (w p2)",
-                      c=self.block_channel, p1=2, p2=2, h=self.hw_dim // 2, w=self.hw_dim // 2)
+        h = rearrange(h, "b (c p1 p2) (h w) -> b c (h p1) (w p2)", c=self.block_channel, p1=2, p2=2, h=self.hw_dim // 2, w=self.hw_dim // 2)
 
         return h
 
@@ -406,7 +402,6 @@ class UNetBlockNoAttention(nn.Module):
                 unet_residual = None
             x = block(x, clip_embeddings, unet_residual)
         return x
-
 
 class UNetBlockAttention(nn.Module):
     def __init__(self,
@@ -429,15 +424,3 @@ class UNetBlockAttention(nn.Module):
             x = block(x, clip_embeddings, pose_embed, garment_embed, unet_residual)
         return x
 
-
-class SRBlock(nn.Module):
-    def __init__(self, block_channel, res_blocks_number):
-        super().__init__()
-        # self.blocks = nn.ModuleList([])
-        # for block in range(res_blocks_number):
-        #     self.blocks.append(ResBlockNoAttention(block_channel, clip_dim))
-
-    def forward(self, x, clip_embeddings):
-        # for idx, block in enumerate(self.blocks):
-        #     x = block(x, clip_embeddings)
-        return x
