@@ -179,10 +179,10 @@ def inference_unet128(person_image_path, garment_image_path, model):
     ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
 
     # base images
-    ip_np = ip.permute(1, 2, 0).squeeze().cpu().numpy()
-    ig_np = ig.permute(1, 2, 0).squeeze().cpu().numpy()
-    ic_np = ic.permute(1, 2, 0).squeeze().cpu().numpy()
-    ia_np = ia.permute(1, 2, 0).squeeze().cpu().numpy()
+    ip_np = ip.squeeze(0).permute(1, 2, 0).squeeze().cpu().numpy()
+    ig_np = ig.squeeze(0).permute(1, 2, 0).squeeze().cpu().numpy()
+    ic_np = ic.squeeze(0).permute(1, 2, 0).squeeze().cpu().numpy()
+    ia_np = ia.squeeze(0).permute(1, 2, 0).squeeze().cpu().numpy()
 
     # make to folders
     os.makedirs(os.path.join("inference", f"{task_name}"), exist_ok=True)
@@ -242,7 +242,7 @@ def inference_sr_diffusion(itr256_path, output_dir):
 class InferenceArgParser:
     def __init__(self):
         self.device = 'cuda'
-        self.model_path = '/home/xkmb/tryondiffusion/tmp_models/ckpt128/ckpt_0.pt'  # 模型文件的路径
+        self.model_path = '/home/xkmb/tryondiffusion/tmp_models/ckpt128/ckpt_1.pt'  # 模型文件的路径
         self.fc1_model_path = '/home/xkmb/tryondiffusion/models/fc1.pth'  # FC1模型的路径
         self.fc2_model_path = '/home/xkmb/tryondiffusion/models/fc2.pth'  # FC2模型的路径
 

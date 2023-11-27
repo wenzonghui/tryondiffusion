@@ -53,7 +53,7 @@ def start_seg_person(an_image_path, an_mask_image_path, output_dir):
     # 这里主要是针对分割人物时需要多次执行分割任务，文件名中出现多个 "_person" 的问题
     if filename.endswith("_person"):
         filename = filename.split('_person')[0]
-    segmented_person_path = os.path.join(output_dir, f"{filename}_person.jpg")
+    segmented_person_path = os.path.join(output_dir, f"seg_person_raw.jpg")
     # Save the segmented image with the specified filename
     cv2.imwrite(segmented_person_path, segmented_person)
 

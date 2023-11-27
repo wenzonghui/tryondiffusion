@@ -20,15 +20,16 @@ def start_pose_json_process(raw_json, output_dir):
             out_listxy.append(point[1])
     json_data = json.dumps(out_listxy)
 
-    # 存到文件夹里
-    with open(output_dir, "w") as file:
-        file.write(json_data)
-
     # 这里返回的是处理后的 pose json 所在的文件路径，区别于 mmpose 刚处理后的
     json_name = raw_json.split('/')[-1].split('.')[0]
-    pose_json_dir = os.path.join(output_dir, f'{json_name}_pose_normlize.json')
+    pose_json_path = os.path.join(output_dir, f'{json_name}_pose_normlize.json')
     # 返回姿态估计的 json 文件路径
-    return pose_json_dir
+
+    # 存到文件夹里
+    with open(pose_json_path, "w") as file:
+        file.write(json_data)
+
+    return pose_json_path
 
 
 def start_pose_jsons_process(input_dir, output_dir):

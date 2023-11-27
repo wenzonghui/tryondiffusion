@@ -33,7 +33,7 @@ def pose_model_process(imgs_path, output_dir):
     # 如果是单张图片而不是文件夹路径，主要用在推理部分
     if imgs_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
         img_name = imgs_path.split('/')[-1].split('.')[0]
-        pose_json_path = os.path.join(output_dir, "predictions", f'{img_name}_pose.json')
+        pose_json_path = os.path.join(output_dir, "predictions", f'{img_name}.json')
         # 返回姿态估计的 json 文件路径
         return pose_json_path
 

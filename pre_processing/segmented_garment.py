@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
 
-from pre_processing.generate_mask import seg_anyone, seg_up
+from generate_mask import seg_any, seg_anyone, seg_up
 
 def get_upper_garment(img, img_parse_map):
     sum_img_parse_map = np.sum(img_parse_map, axis=2)
@@ -50,7 +50,7 @@ def start_seg_garment(an_image_path, an_mask_image_path, output_dir):
 
     # 保存处理过的图片到目标文件夹
     filename = an_image_path.split('/')[-1].split('.')[0]
-    segmented_garment_path = os.path.join(output_dir, f"{filename}_garment.jpg")
+    segmented_garment_path = os.path.join(output_dir, f"seg_garment_raw.jpg")
     # Save the segmented image with the specified filename
     cv2.imwrite(segmented_garment_path, segmented_garment)
 
@@ -108,20 +108,20 @@ if __name__ == "__main__":
     # mask_dir = '/home/xkmb/tryondiffusion/segment_anything_main/test/mask'
     # output_dir = "/home/xkmb/tryondiffusion/segment_anything_main/test/ic"
     # 正式执行分割任务
-    # image_dir = '/home/xkmb/data/train/ig'
-    # json_dir = '/home/xkmb/pose_output/train/ip/predictions'
-    # mask_dir = '/home/xkmb/data/train/ig_mask'
-    # output_dir = "/home/xkmb/data/train/ic"
+    image_dir = '/home/xkmb/data/new_val_ip/ia'
+    json_dir = '/home/xkmb/pose_output/val/ip/predictions'
+    mask_dir = '/home/xkmb/data/new_val_ip/mask'
+    output_dir = "/home/xkmb/data/new_val_ip/new_ia"
     
     # seg_any(image_dir, json_dir, mask_dir, seg_up, sam)
-    # start_seg_garments(image_dir, mask_dir, output_dir)
+    start_seg_garments(image_dir, mask_dir, output_dir)
 
 
     # 用于单张图片推理
     # 推理时候 mask 放在输出文件夹下的子目录，防止文件名重复覆盖掉原文件
-    an_image_path = '/home/xkmb/tryondiffusion/segment_anything_main/test/images/0000001.jpg'
-    a_json_path = '/home/xkmb/tryondiffusion/segment_anything_main/test/pose_json/0000001.json'
-    mask_dir = '/home/xkmb/tryondiffusion/segment_anything_main/test/mask'
-    output_dir = "/home/xkmb/tryondiffusion/segment_anything_main/test/ic"
-    an_mask_image_path = seg_anyone(an_image_path, a_json_path, mask_dir, seg_up, sam)
-    start_seg_garment(an_image_path, an_mask_image_path, output_dir)
+    # an_image_path = '/home/xkmb/tryondiffusion/segment_anything_main/test/images/0000001.jpg'
+    # a_json_path = '/home/xkmb/tryondiffusion/segment_anything_main/test/pose_json/0000001.json'
+    # mask_dir = '/home/xkmb/tryondiffusion/segment_anything_main/test/mask'
+    # output_dir = "/home/xkmb/tryondiffusion/segment_anything_main/test/ic"
+    # an_mask_image_path = seg_anyone(an_image_path, a_json_path, mask_dir, seg_up, sam)
+    # start_seg_garment(an_image_path, an_mask_image_path, output_dir)

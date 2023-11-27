@@ -1,4 +1,6 @@
 """
+这个脚本是数据预处理用到的一些处理函数
+
 这个脚本是实现数据集不重复两两配对，并将配对后的一对图像重新命名饭别放置在两个文件夹中
 可以产生大量的配对数据来使用，谨慎！！！
 
@@ -72,13 +74,37 @@ def rename_files_in_folder(folder_path):
     shutil.rmtree(temp_folder)  # 使用 rmtree 删除非空目录
 
 
+def move_json(source_folder, target_folder):
+    # 这个函数主要是处理半自动分割后不准确，进行手动分割得到的 json 与 image 在同一个文件夹，将所有 json 文件移动到新的文件夹去
+    import os
+    import shutil
+
+    # 如果目标文件夹不存在，则创建它
+    if not os.path.exists(target_folder):
+        os.makedirs(target_folder)
+
+    # 遍历源文件夹中的文件
+    for file_name in os.listdir(source_folder):
+        if file_name.endswith('.json'):
+            source_file = os.path.join(source_folder, file_name)
+            target_file = os.path.join(target_folder, file_name)
+            shutil.move(source_file, target_file)
+
+    print("所有 JSON 文件已从 {} 移动到 {}".format(source_folder, target_folder))
+
+
 if __name__ == '__main__':
     # 执行两两配对
-    source_folder = "/home/xkmb/tryondiffusion/data/val/ip2_raw"
-    dest_folder_a = "/home/xkmb/tryondiffusion/data/val/ip2"  # The first new folder
-    dest_folder_b = "/home/xkmb/tryondiffusion/data/val/ig2"  # The second new folder
-    # pair_and_copy_files(source_folder, dest_folder_a, dest_folder_b)
+    # source_folder = "/home/xkmb/tryondiffusion/data/val/ip2_raw"
+    # dest_folder_a = "/home/xkmb/tryondiffusion/data/val/ip2"  # The first new folder
+    # dest_folder_b = "/home/xkmb/tryondiffusion/data/val/ig2"  # The second new folder
+    # # pair_and_copy_files(source_folder, dest_folder_a, dest_folder_b)
 
-    # 执行打乱配对，区别于两两配对
-    folder_path = "/home/xkmb/tryondiffusion/data/train/ip"
-    rename_files_in_folder(folder_path)
+    # # 执行打乱配对，区别于两两配对
+    # folder_path = "/home/xkmb/tryondiffusion/data/train/ip"
+    # rename_files_in_folder(folder_path)
+
+    # 对手动分割的文件进行处理
+    source_folder = '/home/xkmb/data/new_val_ip/ia'
+    target_folder = '/home/xkmb/data/new_val_ip/json'
+    move_json(source_folder, target_folder)
