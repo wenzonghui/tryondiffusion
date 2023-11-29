@@ -82,44 +82,30 @@ def generate_mask(json_file_path, image_file_path, mask_image_save_path):
 
 
 def generate_masks(json_file_dir, image_file_dir, mask_image_save_dir):
-    # # 批量处理，从分割信息 json 到 mask 图像
+    # 批量处理，从分割信息 json 到 mask 图像
 
-    # # 获取 json 文件夹中的文件列表并按文件名排序
-    # json_files = sorted(os.listdir(json_file_dir))
-
-    # # 获取 image 文件夹中的文件列表并按文件名排序
-    # image_files = sorted(os.listdir(image_file_dir))
-
-    # # 确保目标目录存在
-    # os.makedirs(mask_image_save_dir, exist_ok=True)
-
-    # # 遍历文件列表并处理每个文件对
-    # for json_file, image_file in zip(json_files, image_files):
-    #     print(json_file, image_file)
-
-    #     # 构建完整的文件路径
-    #     json_file_path = os.path.join(json_file_dir, json_file)
-    #     image_file_path = os.path.join(image_file_dir, image_file)
-
-    #     # 调用生成 mask 的函数
-    #     generate_mask(json_file_path, image_file_path, mask_image_save_dir)
-
-    # print("处理完成！")
-
-
+    # 获取 json 文件夹中的文件列表并按文件名排序
     json_files = sorted(os.listdir(json_file_dir))
-    for json_file in json_files:
+
+    # 获取 image 文件夹中的文件列表并按文件名排序
+    image_files = sorted(os.listdir(image_file_dir))
+
+    # 确保目标目录存在
+    os.makedirs(mask_image_save_dir, exist_ok=True)
+
+    # 遍历文件列表并处理每个文件对
+    for json_file, image_file in zip(json_files, image_files):
+        print(json_file, image_file)
 
         # 构建完整的文件路径
         json_file_path = os.path.join(json_file_dir, json_file)
-        image_name = json_file[:-5]+'.jpg'
-        image_file_path = os.path.join(image_file_dir, image_name)
-
-        print(json_file_path, image_file_path)
+        image_file_path = os.path.join(image_file_dir, image_file)
 
         # 调用生成 mask 的函数
         generate_mask(json_file_path, image_file_path, mask_image_save_dir)
 
+    print("处理完成！")
+    
 
 if __name__ == '__main__':
     json_file_dir = '/home/xkmb/data/new_val_ip/json'

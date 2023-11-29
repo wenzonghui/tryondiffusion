@@ -1,4 +1,4 @@
-from diffusion import Diffusion
+from diffusion_DP import Diffusion
 
 
 class ArgParser:
@@ -38,8 +38,8 @@ class ArgParser:
         self.epochs = 20
 
         # fc 模型
-        self.fc1_model_path = '/root/Desktop/dzy/models/fc1.pth'  # FC1模型的路径
-        self.fc2_model_path = '/root/Desktop/dzy/models/fc2.pth'  # FC2模型的路径
+        self.fc1_model_path = '/home/xkmb/tryondiffusion/models/fc1.pth'  # FC1模型的路径
+        self.fc2_model_path = '/home/xkmb/tryondiffusion/models/fc2.pth'  # FC2模型的路径
 
 
 if __name__ == "__main__":

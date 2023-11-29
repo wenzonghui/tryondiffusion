@@ -70,7 +70,7 @@ class SinusoidalPosEmbed(nn.Module):
 
 
 class AttentionPool1d(nn.Module):
-    def __init__(self, pose_embeb_dim, device, num_heads=1):
+    def __init__(self, pose_embeb_dim, num_heads=1, noise_level=0.3):
         """
         Clip inspired 1D attention pooling, reduce garment and person pose along keypoints
         :param pose_embeb_dim: pose embedding dimensions
@@ -84,14 +84,14 @@ class AttentionPool1d(nn.Module):
         self.c_proj = nn.Linear(pose_embeb_dim, pose_embeb_dim)
         self.num_heads = num_heads
         self.pos_encoding = SinusoidalPosEmbed(pose_embeb_dim)
-        self.device = device
+        self.smoothing = GaussianSmoothing(channels=1, kernel_size=3, sigma=noise_level, conv_dim=1)
 
-    def forward(self, x, time_step, noise_level=0.3):
+    def forward(self, x, time_step):
         # if x in format NCP
         # N - Batch Dimension, P - Pose Dimension, C - No. of pose(person and garment)
-        x = x.permute(1, 0, 2).to('cuda')
+        x = x.permute(1, 0, 2)
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (C+1)NP
-        x = x + self.positional_embedding[:, None, :].to(x.dtype).to('cuda')  # (C+1)NP
+        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (C+1)NP
         batch_size = x.shape[1]
         x, _ = F.multi_head_attention_forward(
             query=x[:1], key=x, value=x,
@@ -114,10 +114,7 @@ class AttentionPool1d(nn.Module):
         )
         # x = x.squeeze(0)
         x = x.permute(1, 0, 2)
-
-        smoothing = GaussianSmoothing(channels=1, kernel_size=3, sigma=noise_level, conv_dim=1).to(self.device)
-
-        x_noisy = smoothing(F.pad(x, (1, 1), mode='reflect'))
+        x_noisy = self.smoothing(F.pad(x, (1, 1), mode='reflect'))
         x = x + x_noisy
         x += self.pos_encoding(time_step)[:, None, :]
 

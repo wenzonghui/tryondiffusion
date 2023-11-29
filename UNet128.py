@@ -13,13 +13,13 @@ from network_elem import UNetBlockNoAttention, DownSample, UNetBlockAttention, U
 
 class UNet128(nn.Module):
 
-    def __init__(self, pose_embed_len_dim, device, time_dim=256):
+    def __init__(self, pose_embed_len_dim, time_dim=256, noise_level=0.3):
         super().__init__()
 
         self.pos_encod_layer = SinusoidalPosEmbed(time_dim)
 
         # process clip embeddings
-        self.attn_pool_layer = AttentionPool1d(pose_embed_len_dim, device)
+        self.attn_pool_layer = AttentionPool1d(pose_embed_len_dim,noise_level=noise_level)
 
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> person UNet >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # initial image embedding size 128x128 and 6 channels(concatenate rgb agnostic image and noise)
@@ -92,7 +92,7 @@ class UNet128(nn.Module):
 
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< garment UNet ends <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
-    def forward(self, zt, ic, person_pose_embedding, garment_pose_embedding, time_step, noise_level):
+    def forward(self, zt, ic, person_pose_embedding, garment_pose_embedding, time_step):
         """
         :param zt: rgb_agnostic and noisy ground truth concatenated across channels
         :param ic: segmented garment
@@ -107,7 +107,7 @@ class UNet128(nn.Module):
         pose_embeddings = torch.concat((person_pose_embedding[:, None, :], garment_pose_embedding[:, None, :]), dim=1)
 
         # get clip embeddings
-        clip_embedding = self.attn_pool_layer(pose_embeddings, time_step, noise_level)
+        clip_embedding = self.attn_pool_layer(pose_embeddings, time_step)
 
         # passing through initial conv layer: ic
         # out: 128 * 128 * 128

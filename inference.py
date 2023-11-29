@@ -1,25 +1,22 @@
 import json
 import os
-import sys
 import time
-from UNet128 import UNet128
-from UNet256 import UNet256
 import cv2
 import torch
 from mmpose_main.inference import pose_model_process
+from segment_anything import sam_model_registry
 from pre_processing.generate_mask import seg_anyone, seg_bg, seg_person_left_arm, seg_person_right_arm, seg_up
 from pre_processing.person_pose_embedding.utils.dataloader import normalize_lst
 from pre_processing.pose_json_preprocess import start_pose_json_process
-from pre_processing.segJSON2mask import generate_mask
 from pre_processing.segmented_garment import start_seg_garment
 from pre_processing.segmented_person import start_seg_person
-from diffusion import Diffusion
 from pre_processing.person_pose_embedding.network import AutoEncoder as PersonAutoEncoder
 from pre_processing.garment_pose_embedding.network import AutoEncoder as GarmentAutoEncoder
-from segment_anything_main.segment_anything.modeling import sam
 from utils.dataloader_train import create_transforms_imgs
 from utils.utils import read_img
-from segment_anything import sam_model_registry, SamPredictor
+from diffusion import Diffusion
+from UNet128 import UNet128
+from UNet256 import UNet256
 
 
 def load_fc1():
@@ -68,13 +65,7 @@ def load_unet256():
 
 def load_unetSR():
     # 加载 unetSR，用于最后一步网络
-
-    device = 'cuda'
-    unetSR_model_path = '/home/xkmb/tryondiffusion/models/unetSR.pth'
-    unetSR_model = sr_diffusion()
-    unetSR_model.load_state_dict(torch.load(unetSR_model_path, map_location=device))
-
-    return unetSR_model
+    pass
 
 
 def pre_process(person, garment):
@@ -206,36 +197,12 @@ def inference_unet128(person_image_path, garment_image_path, model):
 
 def inference_unet256(person, garment, unet256_diffusion_model, output_dir):
     # unet256 推理
-
-    ia, ic, jp_embed, jg_embed, itr128, output_dir = inference_unet128(
-        person, garment)
-
-    with torch.no_grad():
-        sampled_image = unet256_diffusion_model.sample(
-            use_ema=False, conditional_inputs=(ia, ic, jp_embed, jg_embed))
-        sampled_image = sampled_image[0].permute(
-            1, 2, 0).squeeze().cpu().numpy()
-
-        # ema sampled image
-        ema_sampled_image = unet256_diffusion_model.sample(
-            use_ema=True, conditional_inputs=(ia, ic, jp_embed, jg_embed))
-        ema_sampled_image = ema_sampled_image[0].permute(
-            1, 2, 0).squeeze().cpu().numpy()
-
-    # 调用新的函数处理并保存图像
-    process_and_save_image(sampled_image, output_dir, "itr256.jpg")
-    process_and_save_image(ema_sampled_image, output_dir, "itr256_ema.jpg")
-
-    # 返回 itr128 图像的存储地址
-    itr256_path = os.path.join(output_dir, "itr256.jpg")
-    return itr256_path, output_dir
+    pass
 
 
 def inference_sr_diffusion(itr256_path, output_dir):
-
-    # 返回 overall 图像的存储地址
-    overall_path = os.path.join(output_dir, "overall.png")
-    return overall_path
+    # sr1024 推理
+    pass
 
 
 

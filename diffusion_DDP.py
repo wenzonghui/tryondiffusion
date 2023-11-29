@@ -4,22 +4,26 @@ import os
 import cv2
 import time
 import numpy as np
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch import optim
+import torch.distributed as dist
+from torch.cuda.amp import GradScaler
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from utils.utils import GaussianSmoothing, read_img
 from utils.dataloader_train import UNetDataset, create_transforms_imgs
 from pre_processing.garment_pose_embedding.utils.dataloader import normalize_lst
 from pre_processing.person_pose_embedding.network import AutoEncoder as PersonAutoEncoder
 from pre_processing.garment_pose_embedding.network import AutoEncoder as GarmentAutoEncoder
-from ema import EMA
+#from ema import EMA
 from UNet128 import UNet128
 from UNet256 import UNet256
 
 
-def smoothen_image(img, sigma):
+def smoothen_image(img, sigma, device):
     # As suggested in: https://jmlr.csail.mit.edu/papers/volume23/21-0635/21-0635.pdf Section 4.4
     # 高斯噪音增强函数
     # 输入：
@@ -30,7 +34,7 @@ def smoothen_image(img, sigma):
                                     kernel_size=3,
                                     sigma=sigma,
                                     conv_dim=2)
-    smoothing2d = smoothing2d.to('cuda')
+    smoothing2d = smoothing2d.to(device)
 
     img = F.pad(img, (1, 1, 1, 1), mode='reflect')
     img = smoothing2d(img)
@@ -65,17 +69,20 @@ def schedule_lr(total_steps, start_lr=0.0, stop_lr=0.0001, pct_increasing_lr=0.0
 
 class Diffusion:
 
-    def __init__(self, device, unet_dim=128, pose_embed_dim=8, time_steps=256, beta_start=1e-4, beta_end=0.02, beta_ema=0.995, noise_input_channel=3):
-        self.device = device
+    def __init__(self, args, gpuid, unet_dim=128, pose_embed_dim=8, time_steps=256, beta_start=1e-4, beta_end=0.02, beta_ema=0.995, noise_input_channel=3):
+        self.device = f'cuda:{gpuid}'
         self.unet_dim = unet_dim
         self.time_steps = time_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
-        self.beta_ema = beta_ema
+        #self.beta_ema = beta_ema
         self.noise_input_channel = noise_input_channel
-        self.beta = self.linear_beta_scheduler().to(device)
+        self.beta = self.linear_beta_scheduler().to(self.device)
         self.alpha = 1 - self.beta
         self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
+        dist.init_process_group(backend='nccl', init_method='env://')
+        args.rank = dist.get_rank()
+        # 在任何其他处理之前，向 ia、ic 添加随机高斯噪声进行噪声增强
         self.sigma = float(torch.FloatTensor(1).uniform_(0.4, 0.6))
         
         # 确定网络模型
@@ -87,6 +94,9 @@ class Diffusion:
         # 将网络模型移到设备上
         self.net = self.net.to(self.device)
 
+        self.net = nn.SyncBatchNorm.convert_sync_batchnorm(self.net)
+        self.net = nn.parallel.DistributedDataParallel(self.net, device_ids=[gpuid])
+        
     def prepare(self, args):
         # 准备训练所需要的数据加载器、优化器、EMA指数移动平均
 
@@ -105,28 +115,33 @@ class Diffusion:
                                          ic_dir=args.validation_ic_folder,
                                          itr128_dir=args.validation_itr128_folder,
                                          unet_size=self.unet_dim)
-        
-        self.train_dataloader = DataLoader(train_dataset, args.batch_size_train, shuffle=False)
-        self.val_dataloader = DataLoader(validation_dataset, args.batch_size_validation, shuffle=False)
-        self.data_len = len(self.train_dataloader) * args.batch_size_train
+
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        self.train_dataloader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=args.batch_size_train, shuffle=False, num_workers=0, pin_memory=True, sampler=train_sampler)
+
+        val_sampler = torch.utils.data.distributed.DistributedSampler(validation_dataset)
+        self.val_dataloader = torch.utils.data.DataLoader(dataset=validation_dataset, batch_size=args.batch_size_validation, shuffle=False, num_workers=0, pin_memory=True, sampler=val_sampler)
+
+        self.data_len = len(self.train_dataloader.sampler) * args.batch_size_train
         self.optimizer = optim.AdamW(self.net.parameters(), lr=args.lr, eps=1e-4)
         self.scheduler = schedule_lr(total_steps=round((self.data_len * args.epochs) / args.batch_size_train),
                                      start_lr=args.start_lr, stop_lr=args.stop_lr,
                                      pct_increasing_lr=args.pct_increasing_lr)
         self.mse = nn.MSELoss()
-        self.ema = EMA(self.beta_ema)
-        self.scaler = torch.cuda.amp.GradScaler()
+        #self.ema = EMA(self.beta_ema)
+        self.scaler = GradScaler(enabled=args.use_mix_precision)
 
         self.fc1 = PersonAutoEncoder(34)
         self.fc1.load_state_dict(torch.load(args.fc1_model_path, map_location=self.device))
         self.fc2 = GarmentAutoEncoder(34)
         self.fc2.load_state_dict(torch.load(args.fc2_model_path, map_location=self.device))
 
-        self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
+        #self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
 
     def prepare_for_inference(self, args):
-        # 普通单卡模式下保存的模型进行加载，单卡推理
-        self.net.load_state_dict(torch.load(args.model_path, map_location=args.device))
+        # 多卡 DDP 模式下保存的模型进行加载，单卡推理 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        self.net.load_state_dict({k.replace('module.',''):v for k,v in torch.load(args.model_path).items()})
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
         # 设置模型为评估模式
         self.net.eval()
@@ -158,7 +173,8 @@ class Diffusion:
         # • use_ema: 布尔值，指示是否使用EMA（指数移动平均）模型来生成图像。
         # • conditional_inputs: 条件输入，包括人物姿势、服装姿势和其他相关信息
 
-        model = self.ema_net if use_ema else self.net
+        #model = self.ema_net if use_ema else self.net
+        model = self.net
         ia, ic, jp, jg = conditional_inputs
 
         ia = ia.to(self.device)
@@ -173,7 +189,7 @@ class Diffusion:
             inp_network_noise = torch.randn(batch_size, self.noise_input_channel, self.unet_dim, self.unet_dim).to(self.device)
 
             # paper says to add noise augmentation to input noise during inference
-            inp_network_noise = smoothen_image(inp_network_noise, self.sigma).to(self.device)
+            inp_network_noise = smoothen_image(inp_network_noise, self.sigma)
 
             # concatenating noise with rgb agnostic image across channels
             # corrupt -> concatenate -> predict
@@ -207,26 +223,23 @@ class Diffusion:
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
-        self.ema.step_ema(self.ema_net, self.net)
+        #self.ema.step_ema(self.ema_net, self.net)
 
         for g in self.optimizer.param_groups:
             g['lr'] = self.scheduler[running_step]
 
-    def single_epoch(self, unet_dim=128, epoch=-1, epochs=-1, every_epoch_steps=-1, train=True):
+    def single_epoch(self, args, unet_dim=128, epoch=-1, epochs=-1, every_epoch_steps=-1):
         # 处理一个训练/验证周期，并可以选择性的打印出损失
 
         total_loss = 0.
-        avg_loss = 0.
+        train_loss = 0.
         num_batches = 0
 
-        if train:
-            self.net.train()
-            dataloader = self.train_dataloader  # 使用训练数据加载器
-        else:
-            self.net.eval()
-            dataloader = self.val_dataloader  # 使用验证数据加载器
+        self.net.train()
+        dataloader = self.train_dataloader  # 使用训练数据加载器
+        dataloader.sampler.set_epoch(epoch)
 
-        for ip, jp, jg, ia, ic, itr128 in dataloader:
+        for ip, jp, jg, ia, ic, itr128 in (tqdm(dataloader) if args.rank == 0 else dataloader):
             # 这里是针对每个 epoch 过大，在中间 ?% 进行一步模型权重存储临时使用
             # if train == True:
             #     if self.running_train_steps == round(0.2 * every_epoch_steps):
@@ -234,12 +247,12 @@ class Diffusion:
             #         self.save_models(0, self.unet_dim)
 
             # 对于图像数据，使用列表推导式处理批次中的每个样本
-            ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma) for path in ia])
-            ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma) for path in ic])
+            ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
+            ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
             ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
 
             if (unet_dim == 256):
-                itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma) for path in itr128])
+                itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
 
             # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
             jp_data = []
@@ -262,7 +275,80 @@ class Diffusion:
             jg_fc2 = self.fc2(jg_tensor)
             jg = jg_fc2[1].clone().detach().to(self.device)
 
-            with torch.autocast(self.device) and (torch.inference_mode() if not train else torch.enable_grad()):
+            with torch.autocast('cuda') and torch.enable_grad():
+                t = self.sample_time_steps(ip_batch.shape[0]).to(self.device)
+
+                # corrupt -> concatenate -> predict
+                # 对 ip 添加 noise 变成 zt
+                zt, noise_epsilon = self.add_noise_to_img(ip_batch, t)
+
+                # unet128: ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
+                if (unet_dim == 128):
+                    zt = torch.cat((ia_batch, zt), dim=1).to(self.device)
+                # unet256: itr128, ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
+                elif (unet_dim == 256):
+                    zt = torch.cat((ia_batch, zt, itr128_batch), dim=1).to(self.device)
+
+                # 利用torch.cuda.amp.autocast控制前向过程中是否使用半精度计算
+                with torch.cuda.amp.autocast(enabled=args.use_mix_precision):
+                    predicted_noise = self.net(zt, ic_batch, jp, jg, t)
+                    loss = self.mse(noise_epsilon, predicted_noise)
+                    total_loss += loss.item()
+                num_batches += 1  # 记录批次数量
+
+            self.train_step(loss, self.running_train_steps)
+            self.running_train_steps += 1
+        
+        train_loss = total_loss / num_batches  # 计算平均损失
+
+        # 只在 rank 0 上打印平均损失
+        if dist.get_rank() == 0:
+            print(f"Epoch {epoch+1}: Training Loss: {train_loss}")
+
+        return train_loss
+    
+    def evaluate(self, unet_dim=128, epoch=-1):
+        # 处理一个训练/验证周期，并可以选择性的打印出损失
+
+        total_loss = 0.
+        val_loss = 0.
+        num_batches = 0
+
+        self.net.eval()
+        dataloader = self.val_dataloader  # 使用验证数据加载器
+
+        for ip, jp, jg, ia, ic, itr128 in dataloader:
+
+            # 对于图像数据，使用列表推导式处理批次中的每个样本
+            ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
+            ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
+            ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
+
+            if (unet_dim == 256):
+                itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
+
+            # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
+            jp_data = []
+            for jp_item in jp:
+                with open(jp_item, 'r') as jp_item:
+                    jp_json = json.load(jp_item)
+                    jp_json_normalize = normalize_lst(jp_json)
+                    jp_data.append(jp_json_normalize)
+            jp_tensor = torch.tensor(jp_data)
+            jp_fc1 = self.fc1(jp_tensor)
+            jp = jp_fc1[1].clone().detach().to(self.device)
+            
+            jg_data = []
+            for jg_item in jg:
+                with open(jg_item, 'r') as jg_item:
+                    jg_json = json.load(jg_item)
+                    jg_json_normalize = normalize_lst(jg_json)
+                    jg_data.append(jg_json_normalize)
+            jg_tensor = torch.tensor(jg_data)
+            jg_fc2 = self.fc2(jg_tensor)
+            jg = jg_fc2[1].clone().detach().to(self.device)
+
+            with torch.autocast('cuda') and torch.inference_mode():
                 t = self.sample_time_steps(ip_batch.shape[0]).to(self.device)
 
                 # corrupt -> concatenate -> predict
@@ -281,135 +367,95 @@ class Diffusion:
                 loss = self.mse(noise_epsilon, predicted_noise)
                 total_loss += loss.item()
                 num_batches += 1  # 记录批次数量
-
-            if train:
-                print("Epoch: " + str(epoch+1) + "/" + str(epochs) + " ::: " + "Step: " + str(self.running_train_steps) + "/" + str(every_epoch_steps)+" ==================== "+f"train_mse_loss: {loss.item():2.3f}, learning_rate: {self.scheduler[self.running_train_steps]}")
-                self.train_step(loss, self.running_train_steps)
-                self.running_train_steps += 1
         
-        avg_loss = total_loss / num_batches  # 计算平均损失
-        return avg_loss
+        # 将 total_loss 转换为张量，并在所有 GPU 上聚合
+        total_loss_tensor = torch.tensor(total_loss).to(self.device)
+        dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
+
+        # 确保 num_batches 在所有 GPU 上相同
+        num_batches_tensor = torch.tensor(num_batches).to(self.device)
+        dist.all_reduce(num_batches_tensor, op=dist.ReduceOp.SUM)
+
+        # 在每个 GPU 上计算平均损失
+        val_loss = total_loss_tensor.item() / num_batches_tensor.item()
+
+        # 只在 rank 0 上打印平均损失
+        if dist.get_rank() == 0:
+            print(f"Epoch {epoch+1}: Validation Loss: {val_loss}")
+
+        return val_loss
 
     def logging_images(self, unet_dim, epoch=-1, train=False):
-        # 在训练时记录图像样本
-        if (train == True):
-            for idx, (ip, jp, jg, ia, ic, itr128) in enumerate(self.train_dataloader): # 这里一次拿到一个批次
-                for i in range(len(ip)): # 这里需要从批次里把每张图片拿出来
-                    # 获取 ip 的文件名
-                    person_name = os.path.basename(ip[i])[:-4]
+        # 记录图像样本
 
-                    ia_item = read_img(ia[i])
-                    ia_item = create_transforms_imgs(ia_item, unet_dim)
-                    ia_item = ia_item.clone().detach()
-                    ia_item.unsqueeze_(0)
+        if train:
+            dataloader = self.train_dataloader
+        else:
+            dataloader = self.val_dataloader
 
-                    ic_item = read_img(ic[i])
-                    ic_item = create_transforms_imgs(ic_item, unet_dim)
-                    ic_item = ic_item.clone().detach()
-                    ic_item.unsqueeze_(0)
+        for idx, (ip, jp, jg, ia, ic, itr128) in enumerate(dataloader): # 这里一次拿到一个批次
+            for i in range(len(ip)): # 这里需要从批次里把每张图片拿出来
+                # 获取 ip 的文件名
+                person_name = os.path.basename(ip[i])[:-4]
 
-                    ip_item = read_img(ip[i])
-                    ip_item = create_transforms_imgs(ip_item, unet_dim)
-                    ip_item = ip_item.clone().detach()
-                    ip_item.unsqueeze_(0)
+                ia_item = read_img(ia[i])
+                ia_item = create_transforms_imgs(ia_item, unet_dim)
+                ia_item = ia_item.clone().detach()
+                ia_item.unsqueeze_(0)
 
-                    if(unet_dim == 256):
-                        itr128_item = read_img(itr128[i])
-                        itr128_item = create_transforms_imgs(itr128_item, unet_dim)
-                        itr128_item = itr128_item.clone().detach()
-                        itr128_item.unsqueeze_(0)
+                ic_item = read_img(ic[i])
+                ic_item = create_transforms_imgs(ic_item, unet_dim)
+                ic_item = ic_item.clone().detach()
+                ic_item.unsqueeze_(0)
 
-                    # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
-                    jp_data = []
-                    with open(jp[i], 'r') as jp_item:
-                        jp_json = json.load(jp_item)
-                        jp_json_normalize = normalize_lst(jp_json)
-                        jp_data.append(jp_json_normalize)
-                    jp_tensor = torch.tensor(jp_data)
-                    jp_fc1 = self.fc1(jp_tensor)
-                    jp_item = jp_fc1[1].clone().detach().to(self.device)
-                    
-                    jg_data = []
-                    with open(jg[i], 'r') as jg_item:
-                        jg_json = json.load(jg_item)
-                        jg_json_normalize = normalize_lst(jg_json)
-                        jg_data.append(jg_json_normalize)
-                    jg_tensor = torch.tensor(jg_data)
-                    jg_fc2 = self.fc2(jg_tensor)
-                    jg_item = jg_fc2[1].clone().detach().to(self.device)
+                ip_item = read_img(ip[i])
+                ip_item = create_transforms_imgs(ip_item, unet_dim)
+                ip_item = ip_item.clone().detach()
+                ip_item.unsqueeze_(0)
 
-                    # sampled image
-                    sampled_image = self.sample(use_ema=False, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
-                    sampled_image = sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
+                if(unet_dim == 256):
+                    itr128_item = read_img(itr128[i])
+                    itr128_item = create_transforms_imgs(itr128_item, unet_dim)
+                    itr128_item = itr128_item.clone().detach()
+                    itr128_item.unsqueeze_(0)
 
-                    # ema sampled image
-                    ema_sampled_image = self.sample(use_ema=True, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
-                    ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
+                # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
+                jp_data = []
+                with open(jp[i], 'r') as jp_item:
+                    jp_json = json.load(jp_item)
+                    jp_json_normalize = normalize_lst(jp_json)
+                    jp_data.append(jp_json_normalize)
+                jp_tensor = torch.tensor(jp_data)
+                jp_fc1 = self.fc1(jp_tensor)
+                jp_item = jp_fc1[1].clone().detach().to(self.device)
+                
+                jg_data = []
+                with open(jg[i], 'r') as jg_item:
+                    jg_json = json.load(jg_item)
+                    jg_json_normalize = normalize_lst(jg_json)
+                    jg_data.append(jg_json_normalize)
+                jg_tensor = torch.tensor(jg_data)
+                jg_fc2 = self.fc2(jg_tensor)
+                jg_item = jg_fc2[1].clone().detach().to(self.device)
 
+                # sampled image
+                sampled_image = self.sample(use_ema=False, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
+                sampled_image = sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
+
+                # ema sampled image
+                # ema_sampled_image = self.sample(use_ema=True, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
+                # ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
+
+                if train:
                     # 保存 itr128 或者 itr256
                     itr_folder = os.path.join("data/train", f"itr{unet_dim}")
-                    itrema_folder = os.path.join("data/train", f"itr{unet_dim}_ema")
+                    # itrema_folder = os.path.join("data/train", f"itr{unet_dim}_ema")
                     # save sampled image
                     cv2.imwrite(os.path.join(itr_folder, f"{person_name}.jpg"), sampled_image)
                     # save ema sampled image
-                    cv2.imwrite(os.path.join(itrema_folder, f"{person_name}.jpg"), ema_sampled_image)
+                    # cv2.imwrite(os.path.join(itrema_folder, f"{person_name}.jpg"), ema_sampled_image)
                     print(f"In train: Saved itr_{unet_dim} {person_name}.jpg")
-
-        # 在验证时记录图像样本
-        elif (train == False):
-            for idx, (ip, jp, jg, ia, ic, itr128) in enumerate(self.val_dataloader):  # 这里一次拿到一个批次
-                for i in range(len(ip)):  # 这里需要从批次里把每张图片拿出来
-                    # 获取 ip 的文件名
-                    person_name = os.path.basename(ip[i])[:-4]
-
-                    ia_item = read_img(ia[i])
-                    ia_item = create_transforms_imgs(ia_item, unet_dim)
-                    ia_item = ia_item.clone().detach()
-                    ia_item.unsqueeze_(0)
-
-                    ic_item = read_img(ic[i])
-                    ic_item = create_transforms_imgs(ic_item, unet_dim)
-                    ic_item = ic_item.clone().detach()
-                    ic_item.unsqueeze_(0)
-
-                    ip_item = read_img(ip[i])
-                    ip_item = create_transforms_imgs(ip_item, unet_dim)
-                    ip_item = ip_item.clone().detach()
-                    ip_item.unsqueeze_(0)
-
-                    if(unet_dim == 256):
-                        itr128_item = read_img(itr128[i])
-                        itr128_item = create_transforms_imgs(itr128_item, unet_dim)
-                        itr128_item = itr128_item.clone().detach()
-                        itr128_item.unsqueeze_(0)
-
-                    # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
-                    jp_data = []
-                    with open(jp[i], 'r') as jp_item:
-                        jp_json = json.load(jp_item)
-                        jp_json_normalize = normalize_lst(jp_json)
-                        jp_data.append(jp_json_normalize)
-                    jp_tensor = torch.tensor(jp_data)
-                    jp_fc1 = self.fc1(jp_tensor)
-                    jp_item = jp_fc1[1].clone().detach().to(self.device)
-                    
-                    jg_data = []
-                    with open(jg[i], 'r') as jg_item:
-                        jg_json = json.load(jg_item)
-                        jg_json_normalize = normalize_lst(jg_json)
-                        jg_data.append(jg_json_normalize)
-                    jg_tensor = torch.tensor(jg_data)
-                    jg_fc2 = self.fc2(jg_tensor)
-                    jg_item = jg_fc2[1].clone().detach().to(self.device)
-
-                    # sampled image
-                    sampled_image = self.sample(use_ema=False, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
-                    sampled_image = sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
-
-                    # ema sampled image
-                    ema_sampled_image = self.sample(use_ema=True, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
-                    ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
-
+                else:
                     # base images
                     ip_np = ip_item[0].permute(1, 2, 0).squeeze().cpu().numpy()
                     ic_np = ic_item[0].permute(1, 2, 0).squeeze().cpu().numpy()
@@ -417,11 +463,11 @@ class Diffusion:
 
                     # 保存 itr128 或者 itr256
                     itr_folder = os.path.join("data/val", f"itr{unet_dim}")
-                    itrema_folder = os.path.join("data/val", f"itr{unet_dim}_ema")
+                    # itrema_folder = os.path.join("data/val", f"itr{unet_dim}_ema")
                     # save sampled image
                     cv2.imwrite(os.path.join(itr_folder, f"{person_name}.jpg"), sampled_image)
                     # save ema sampled image
-                    cv2.imwrite(os.path.join(itrema_folder, f"{person_name}.jpg"), ema_sampled_image)
+                    # cv2.imwrite(os.path.join(itrema_folder, f"{person_name}.jpg"), ema_sampled_image)
                     print(f"In val: Saved itr_{unet_dim} {person_name}.jpg")
 
                     # 保存验证的图像
@@ -435,67 +481,74 @@ class Diffusion:
                     # save sampled image
                     cv2.imwrite(os.path.join(images_folder, "sampled.jpg"), sampled_image)
                     # save ema sampled image
-                    cv2.imwrite(os.path.join(images_folder, "ema_sampled.jpg"), ema_sampled_image)
+                    # cv2.imwrite(os.path.join(images_folder, "ema_sampled.jpg"), ema_sampled_image)
                     print(f"In val: Saved epoch:{epoch+1} images")
 
     def save_models(self, epoch=-1, unet_dim=128):
         # 保存模型的权重和优化器状态
 
-        print(f"Save models epoch: {epoch+1}.")
+        if dist.get_rank() == 0:
+            print(f"Save models epoch: {epoch+1}.")
 
-        # 模型保存目录
-        ckpt_path = os.path.join("tmp_models", f"ckpt{unet_dim}")
-        ema_ckpt_path = os.path.join("tmp_models", f"ema_ckpt{unet_dim}")
-        optim_path = os.path.join("tmp_models", f"optim{unet_dim}")
-        # 若目录不存在就创建
-        if not os.path.exists(ckpt_path):
-            os.makedirs(ckpt_path)
-        if not os.path.exists(ema_ckpt_path):
-            os.makedirs(ema_ckpt_path)
-        if not os.path.exists(optim_path):
-            os.makedirs(optim_path)
-        
-        # 单卡GPU训练
-        torch.save(self.net.state_dict(), os.path.join(ckpt_path, f"ckpt_{epoch+1}.pt"))
-        torch.save(self.ema_net.state_dict(), os.path.join(ema_ckpt_path, f"ema_ckpt_{epoch+1}.pt"))
-        torch.save(self.optimizer.state_dict(), os.path.join(optim_path, f"optim_{epoch+1}.pt"))
+            # 模型保存目录
+            ckpt_path = os.path.join("tmp_models", f"ckpt{unet_dim}")
+            # ema_ckpt_path = os.path.join("tmp_models", f"ema_ckpt{unet_dim}")
+            optim_path = os.path.join("tmp_models", f"optim{unet_dim}")
+            # 若目录不存在就创建
+            if not os.path.exists(ckpt_path):
+                os.makedirs(ckpt_path)
+            # if not os.path.exists(ema_ckpt_path):
+            #     os.makedirs(ema_ckpt_path)
+            if not os.path.exists(optim_path):
+                os.makedirs(optim_path)
+            
+            # 单卡GPU训练
+            torch.save(self.net.state_dict(), os.path.join(ckpt_path, f"ckpt_{epoch+1}.pt"))
+            # torch.save(self.ema_net.state_dict(), os.path.join(ema_ckpt_path, f"ema_ckpt_{epoch+1}.pt"))
+            torch.save(self.optimizer.state_dict(), os.path.join(optim_path, f"optim_{epoch+1}.pt"))
 
     def train(self, args):
         # 开始和管理训练过程
 
         # 每一个 epoch 包含多少 steps
         every_epoch_steps = round(self.data_len / args.batch_size_train)
-        print(f"\nStarting training\n")
-        print("args.total_steps: ", round((self.data_len * args.epochs) / args.batch_size_train))
-        print("args.batch_size_train: ", args.batch_size_train)
-        print("data_len: ", self.data_len)
-        print("Every epoch steps: ", every_epoch_steps)
-        print("Epochs: ", args.epochs)
+        if dist.get_rank() == 0:
+            print(f"\nStarting training\n")
+            print("args.total_steps: ", round((self.data_len * args.epochs) / args.batch_size_train))
+            print("args.batch_size_train: ", args.batch_size_train)
+            print("data_len: ", self.data_len)
+            print("Every epoch steps: ", every_epoch_steps)
+            print("Epochs: ", args.epochs)
+            writer = SummaryWriter(log_dir=args.logdir, flush_secs=120)
 
         for epoch in range(args.epochs):
-            print(f"\nStarting Epoch: {epoch + 1} / {args.epochs}")
+            if dist.get_rank() == 0:
+                print(f"\nStarting Epoch: {epoch + 1} / {args.epochs}")
             self.running_train_steps = 1
             # 记录这一个 epoch 开始时间
             start_time = time.time()
             # 在每个训练周期结束后进行验证，打印训练集 loss
-            train_loss = self.single_epoch(unet_dim=self.unet_dim, epoch=epoch, epochs=args.epochs, every_epoch_steps=every_epoch_steps, train=True)
-            print(f"Epoch {epoch+1}: Training Loss: {train_loss}")
+            train_loss = self.single_epoch(args, unet_dim=self.unet_dim, epoch=epoch, epochs=args.epochs, every_epoch_steps=every_epoch_steps)
+            if dist.get_rank() == 0:
+                writer.add_scalar(tag='Loss/train', scalar_value=train_loss, global_step=epoch)
             # 记录这一个 epoch 结束时间
             end_time = time.time()
             # 计算这一个 epoch 总花费时间
             hours, minutes, seconds = calculate_time(start_time, end_time)
-            print(f"Epoch Execution Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
+            if dist.get_rank() == 0:
+                print(f"Epoch Execution Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
 
             # 在每个训练周期结束后进行验证，打印验证集 loss
-            val_loss = self.single_epoch(unet_dim=self.unet_dim, epoch=epoch, epochs=args.epochs, every_epoch_steps=every_epoch_steps, train=False)
-            print(f"Epoch {epoch+1}: Validation Loss: {val_loss}")
+            val_loss = self.evaluate(unet_dim=self.unet_dim, epoch=epoch)
+            if dist.get_rank() == 0:
+                writer.add_scalar(tag='Loss/val', scalar_value=val_loss, global_step=epoch)
 
             # 指定多少个 epoch 执行完后，对模型进行保存：ckpt.pth, ema_ckpt.pth, optim.pth
             if (epoch + 1) % args.model_saving_frequency == 0:
                 self.save_models(epoch, self.unet_dim)
             
             # 指定多少个 epoch 执行完后，对生成的训练集图像进行保存
-            # if (epoch + 1) == 1 or (epoch + 1) % 50 == 0:
+            # if (epoch + 1) % 100 == 0:
             #     # 训练结束，对训练集进行图像记录
             #     # 记录开始时间
             #     start_time = time.time()
@@ -503,10 +556,11 @@ class Diffusion:
             #     # 记录结束时间
             #     end_time = time.time()
             #     hours, minutes, seconds = calculate_time(start_time, end_time)
-            #     print(f"Train Save Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
+            #     if dist.get_rank() == 0:
+            #         print(f"Train Save Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
 
             # 指定多少个 epoch 执行完后，对生成的验证集图像进行保存
-            # if (epoch + 1) == 1 or (epoch + 1) % 50 == 0:
+            # if (epoch + 1) % 100 == 0:
             #     # 训练结束，对验证集进行图像记录
             #     # 记录开始时间
             #     start_time = time.time()
@@ -514,6 +568,10 @@ class Diffusion:
             #     # 记录结束时间
             #     end_time = time.time()
             #     hours, minutes, seconds = calculate_time(start_time, end_time)
-            #     print(f"Val Save Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
+            #     if dist.get_rank() == 0:
+            #         print(f"Val Save Time: {hours} hours, {minutes} minutes, and {seconds} seconds")
 
-        print(f"Training Done Successfully!")
+        if dist.get_rank() == 0:
+            writer.close()
+            print(f"Training Done Successfully!")
+        dist.destroy_process_group()

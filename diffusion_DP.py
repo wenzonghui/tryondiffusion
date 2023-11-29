@@ -47,6 +47,7 @@ def calculate_time(start_time, end_time):
 
     return hours, minutes, seconds
 
+
 def schedule_lr(total_steps, start_lr=0.0, stop_lr=0.0001, pct_increasing_lr=0.02):
     # 学习计划率、根据训练步骤调整学习率
     # 参数:
@@ -77,15 +78,20 @@ class Diffusion:
         self.alpha = 1 - self.beta
         self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
         self.sigma = float(torch.FloatTensor(1).uniform_(0.4, 0.6))
-        
+
         # 确定网络模型
         if unet_dim == 128:
-            self.net = UNet128(pose_embed_dim, time_steps, self.sigma)
+            self.net = UNet128(pose_embed_dim, time_steps, self.sigma).to(device)
+            # DataParallel：DP单机多卡并行训练 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            gpus = [0, 1]  # 这里使用8卡进行训练
+            self.net = nn.DataParallel(self.net, device_ids=gpus, output_device=gpus[0])
+            # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         elif unet_dim == 256:
-            self.net = UNet256(pose_embed_dim, time_steps, self.sigma)
-        
-        # 将网络模型移到设备上
-        self.net = self.net.to(self.device)
+            self.net = UNet256(pose_embed_dim, time_steps, self.sigma).to(device)
+            # DataParallel：DP单机多卡并行训练 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            gpus = [0, 1]  # 这里使用8卡进行训练
+            self.net = nn.DataParallel(self.net, device_ids=gpus, output_device=gpus[0])
+            # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
     def prepare(self, args):
         # 准备训练所需要的数据加载器、优化器、EMA指数移动平均
@@ -105,7 +111,7 @@ class Diffusion:
                                          ic_dir=args.validation_ic_folder,
                                          itr128_dir=args.validation_itr128_folder,
                                          unet_size=self.unet_dim)
-        
+
         self.train_dataloader = DataLoader(train_dataset, args.batch_size_train, shuffle=False)
         self.val_dataloader = DataLoader(validation_dataset, args.batch_size_validation, shuffle=False)
         self.data_len = len(self.train_dataloader) * args.batch_size_train
@@ -125,16 +131,15 @@ class Diffusion:
         self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
 
     def prepare_for_inference(self, args):
-        # 普通单卡模式下保存的模型进行加载，单卡推理
-        self.net.load_state_dict(torch.load(args.model_path, map_location=args.device))
+        # 多卡 DP 模式下保存的模型进行加载，单卡推理 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        self.net.load_state_dict({k.replace('module.',''):v for k,v in torch.load(args.model_path).items()})
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
         # 设置模型为评估模式
         self.net.eval()
 
         # 如果您有使用自编码器（如 FC1 和 FC2）也需要加载它们的状态
-        self.fc1 = PersonAutoEncoder(34)
         self.fc1.load_state_dict(torch.load(args.fc1_model_path, map_location=args.device))
-        self.fc2 = GarmentAutoEncoder(34)
         self.fc2.load_state_dict(torch.load(args.fc2_model_path, map_location=args.device))
 
     def linear_beta_scheduler(self):
@@ -198,7 +203,7 @@ class Diffusion:
         inp_network_noise = (inp_network_noise * 255).type(torch.uint8)
 
         return inp_network_noise
-        
+
     # 进行单个训练步骤，包括反向传播和参数更新
     def train_step(self, loss, running_step):
         # 执行单个训练步骤，包括反向传播和参数更新
