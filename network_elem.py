@@ -352,8 +352,11 @@ class ResBlockAttention(nn.Module):
         self.swish2 = nn.SiLU(True)
         self.conv2 = nn.Conv2d(block_channel, block_channel, (3, 3), padding=1)
         self.conv_residual = nn.Conv2d(input_channel, block_channel, (3, 3), padding=1)
-        att_dim = (hw_dim // 2) ** 2
-
+        
+        ## patch维度
+        ## att_dim = (hw_dim // 2) ** 2
+        # 通道维度
+        att_dim = self.block_channel
         # pose vector length will be same as clip pooled length
         self.self_attention = SelfAttention(dim=att_dim, pose_dim=clip_dim)
         self.cross_attention = CrossAttention(zt_dim=att_dim, ic_dim=att_dim)
@@ -372,15 +375,25 @@ class ResBlockAttention(nn.Module):
         h = self.conv2(h)
         h += self.conv_residual(x)
 
+        # 基于补丁的方式进行交叉注意力，其中注意力维度是（补丁的）空间维度而不是通道维度
         # self attention with pose embed concat with key value
-        h = rearrange(h, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
+        ## patch维度
+        ## h = rearrange(h, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
+        # 通道维度
+        h = rearrange(h, "b c h w -> b (h w) c")
         h = self.self_attention(h, pose_embed)
 
         # cross attention with query from zt and key value from ic
-        garment_embed = rearrange(garment_embed, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
+        ## patch维度
+        ## garment_embed = rearrange(garment_embed, "b c (h p1) (w p2) -> b (c p1 p2) (h w)", p1=2, p2=2)
+        # 通道维度
+        garment_embed = rearrange(garment_embed, "b c h w -> b (h w) c")
         h = self.cross_attention(h, garment_embed)
-        h = rearrange(h, "b (c p1 p2) (h w) -> b c (h p1) (w p2)", c=self.block_channel, p1=2, p2=2, h=self.hw_dim // 2, w=self.hw_dim // 2)
-
+        
+        ## patch维度
+        ## h = rearrange(h, "b (c p1 p2) (h w) -> b c (h p1) (w p2)", c=self.block_channel, p1=2, p2=2, h=self.hw_dim // 2, w=self.hw_dim // 2)
+        # 通道维度
+        h = rearrange(h, "b (h w) c -> b c h w", h=self.hw_dim, w=self.hw_dim)
         return h
 
 
@@ -401,12 +414,7 @@ class UNetBlockNoAttention(nn.Module):
         return x
 
 class UNetBlockAttention(nn.Module):
-    def __init__(self,
-                 block_channel,
-                 clip_dim,
-                 res_blocks_number,
-                 hw_dim,
-                 input_channel=None):
+    def __init__(self, block_channel, clip_dim, res_blocks_number, hw_dim, input_channel=None):
         super().__init__()
         self.blocks = nn.ModuleList([])
         for idx, block in enumerate(range(res_blocks_number)):

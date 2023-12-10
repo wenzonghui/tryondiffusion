@@ -1,5 +1,5 @@
 """
-通过 sam 得到的分割 mask 图像，与原图像一起进行处理，进而得到分割出的 person 的图像
+通过 sam 得到的分割 mask 图像，与原图像一起进行处理，进而得到分割出的 garment 的图像
 """
 
 import cv2
@@ -10,11 +10,11 @@ from generate_mask import seg_any, seg_anyone, seg_up
 
 def get_upper_garment(img, img_parse_map):
     sum_img_parse_map = np.sum(img_parse_map, axis=2)
-    # print(sum_img_parse_map[500][300:])
+    # print(sum_img_parse_map[128][:])
 
     for i in range(sum_img_parse_map.shape[0]):
         for j in range(sum_img_parse_map.shape[1]):
-            if 200 <= sum_img_parse_map[i][j] <= 300 or sum_img_parse_map[i][j] > 400:  # 这个二进制的值需要打印出来看在哪个值的附近
+            if 200 <= sum_img_parse_map[i][j] <= 300:  # 这个二进制的值需要打印出来看在哪个值的附近
                 sum_img_parse_map[i][j] = 1
             else:
                 sum_img_parse_map[i][j] = 0
@@ -76,7 +76,7 @@ def start_seg_garments(input_dir1, input_dir2, output_dir):
     os.makedirs(ic_dir, exist_ok=True)
 
     # 遍历源文件夹中的所有文件
-    for filename in os.listdir(ig_dir):
+    for filename in os.listdir(mask_dir):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):  # 检查文件是否为图片
             img_path = os.path.join(ig_dir, filename)
             mask_path = os.path.join(mask_dir, filename)
@@ -95,10 +95,10 @@ def start_seg_garments(input_dir1, input_dir2, output_dir):
 
 if __name__ == "__main__":
     # 加载模型
-    sam_checkpoint = "/home/xkmb/tryondiffusion/models/sam_vit_h_4b8939.pth"
-    model_type = "vit_h"
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device="cuda")
+    # sam_checkpoint = "/home/xkmb/tryondiffusion/models/sam_vit_h_4b8939.pth"
+    # model_type = "vit_h"
+    # sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    # sam.to(device="cuda")
 
 
     # 用于批量操作
@@ -108,10 +108,10 @@ if __name__ == "__main__":
     # mask_dir = '/home/xkmb/tryondiffusion/segment_anything_main/test/mask'
     # output_dir = "/home/xkmb/tryondiffusion/segment_anything_main/test/ic"
     # 正式执行分割任务
-    image_dir = '/home/xkmb/data/new_val_ip/ia'
-    json_dir = '/home/xkmb/pose_output/val/ip/predictions'
-    mask_dir = '/home/xkmb/data/new_val_ip/mask'
-    output_dir = "/home/xkmb/data/new_val_ip/new_ia"
+    image_dir = '/home/xkmb/桌面/val2/ig'
+    json_dir = '/home/xkmb/data/pose/val/ig/predictions'
+    mask_dir = '/home/xkmb/桌面/val2/ig_mask2'
+    output_dir = "/home/xkmb/桌面/val2/ic2"
     
     # seg_any(image_dir, json_dir, mask_dir, seg_up, sam)
     start_seg_garments(image_dir, mask_dir, output_dir)

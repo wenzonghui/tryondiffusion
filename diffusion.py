@@ -125,13 +125,13 @@ class Diffusion:
         self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
 
     def prepare_for_inference(self, args):
-        # 普通单卡模式下保存的模型进行加载，单卡推理
+        # 保存的模型进行单卡推理
         self.net.load_state_dict(torch.load(args.model_path, map_location=args.device))
 
         # 设置模型为评估模式
         self.net.eval()
 
-        # 如果您有使用自编码器（如 FC1 和 FC2）也需要加载它们的状态
+        # 加载FC1 和 FC2
         self.fc1 = PersonAutoEncoder(34)
         self.fc1.load_state_dict(torch.load(args.fc1_model_path, map_location=args.device))
         self.fc2 = GarmentAutoEncoder(34)
@@ -234,6 +234,7 @@ class Diffusion:
             #         self.save_models(0, self.unet_dim)
 
             # 对于图像数据，使用列表推导式处理批次中的每个样本
+            # 在使用 ia、ic 之前对其进行加噪
             ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma) for path in ia])
             ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma) for path in ic])
             ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])

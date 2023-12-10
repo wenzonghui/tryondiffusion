@@ -23,14 +23,18 @@ def normalize_lst(lst):
     # lst = [normalize(lst[i], 0, 1024) if i % 2 else normalize(lst[i]+119, 0, 1024) for i in range(len(lst))]
     normalized_list = list()
     for i in range(len(lst)):
-        if i % 2:  # y
-            val = normalize(lst[i], 0, 1024)
-        else:  # x
-            # condition so that non-existent keypoint remain zero, if x and y both are 0 keypoint non-existent
-            if lst[i] == 0 and lst[i + 1] == 0:
-                val = lst[i]
-            else:
-                val = normalize(lst[i] + 119, 0, 1024)
+        if lst[i] == 0 and lst[i + 1] == 0:
+           val = lst[i]
+        else:
+           val = normalize(lst[i], 0, 255)
+    #    if i % 2:  # y
+    #        val = normalize(lst[i], 0, 255)
+    #    else:  # x
+    #        # condition so that non-existent keypoint remain zero, if x and y both are 0 keypoint non-existent
+    #        if lst[i] == 0 and lst[i + 1] == 0:
+    #            val = lst[i]
+    #        else:
+    #           val = normalize(lst[i] + 119, 0, 255)
         normalized_list.append(val)
     return normalized_list
 

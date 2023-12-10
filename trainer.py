@@ -10,20 +10,20 @@ class ArgParser:
         self.pct_increasing_lr = 0.02
 
         # 训练集
-        self.train_ip_folder = "data_test/train/ip"  # 处理后变成zt
-        self.train_jp_folder = "data_test/train/jp"
-        self.train_ia_folder = "data_test/train/ia"
-        self.train_ic_folder = "data_test/train/ic"
-        self.train_jg_folder = "data_test/train/jg"
-        self.train_itr128_folder = "data_test/train/itr128"
+        self.train_ip_folder = "data/train/ip"  # 处理后变成zt
+        self.train_jp_folder = "data/train/jp"
+        self.train_ia_folder = "data/train/ia"
+        self.train_ic_folder = "data/train/ic"
+        self.train_jg_folder = "data/train/jg"
+        self.train_itr128_folder = "data/train/itr128"
 
         # 验证集
-        self.validation_ip_folder = "data_test/val/ip"  # 处理后变成zt
-        self.validation_jp_folder = "data_test/val/jp"
-        self.validation_ia_folder = "data_test/val/ia"
-        self.validation_ic_folder = "data_test/val/ic"
-        self.validation_jg_folder = "data_test/val/jg"
-        self.validation_itr128_folder = "data_test/val/itr128"
+        self.validation_ip_folder = "data/val/ip"  # 处理后变成zt
+        self.validation_jp_folder = "data/val/jp"
+        self.validation_ia_folder = "data/val/ia"
+        self.validation_ic_folder = "data/val/ic"
+        self.validation_jg_folder = "data/val/jg"
+        self.validation_itr128_folder = "data/val/itr128"
 
         # 批次大小
         self.batch_size_train = 1  # 训练的 batch_size

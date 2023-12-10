@@ -11,7 +11,4 @@
         ema_ckpt256
         optim256
         sr_diffusion
-        fc1
-        fc2
-        pose_model
         

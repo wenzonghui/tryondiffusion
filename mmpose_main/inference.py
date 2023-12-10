@@ -39,6 +39,6 @@ def pose_model_process(imgs_path, output_dir):
 
 
 if __name__ == "__main__":
-    imgs_path = '/home/xkmb/tryondiffusion/mmpose_main/data/00006_00.jpg'
-    output_dir = '/home/xkmb/tryondiffusion/mmpose_main/pose_output'
+    imgs_path = '/home/xkmb/data/train/ip'
+    output_dir = '/home/xkmb/data/pose/train/ip'
     pose_model_process(imgs_path, output_dir)

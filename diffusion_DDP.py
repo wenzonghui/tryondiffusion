@@ -37,7 +37,8 @@ def smoothen_image(img, sigma, device):
     smoothing2d = smoothing2d.to(device)
 
     img = F.pad(img, (1, 1, 1, 1), mode='reflect')
-    img = smoothing2d(img)
+    with torch.no_grad():
+        img = smoothing2d(img)
 
     return img
 
@@ -117,10 +118,10 @@ class Diffusion:
                                          unet_size=self.unet_dim)
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        self.train_dataloader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=args.batch_size_train, shuffle=False, num_workers=0, pin_memory=True, sampler=train_sampler)
+        self.train_dataloader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=args.batch_size_train, shuffle=False, num_workers=8, pin_memory=False, sampler=train_sampler)
 
         val_sampler = torch.utils.data.distributed.DistributedSampler(validation_dataset)
-        self.val_dataloader = torch.utils.data.DataLoader(dataset=validation_dataset, batch_size=args.batch_size_validation, shuffle=False, num_workers=0, pin_memory=True, sampler=val_sampler)
+        self.val_dataloader = torch.utils.data.DataLoader(dataset=validation_dataset, batch_size=args.batch_size_validation, shuffle=False, num_workers=8, pin_memory=False, sampler=val_sampler)
 
         self.data_len = len(self.train_dataloader.sampler) * args.batch_size_train
         self.optimizer = optim.AdamW(self.net.parameters(), lr=args.lr, eps=1e-4)
@@ -133,24 +134,12 @@ class Diffusion:
 
         self.fc1 = PersonAutoEncoder(34)
         self.fc1.load_state_dict(torch.load(args.fc1_model_path, map_location=self.device))
+        self.fc1.eval()
         self.fc2 = GarmentAutoEncoder(34)
         self.fc2.load_state_dict(torch.load(args.fc2_model_path, map_location=self.device))
+        self.fc2.eval()
 
         #self.ema_net = copy.deepcopy(self.net).eval().requires_grad_(False)
-
-    def prepare_for_inference(self, args):
-        # 多卡 DDP 模式下保存的模型进行加载，单卡推理 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-        self.net.load_state_dict({k.replace('module.',''):v for k,v in torch.load(args.model_path).items()})
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-        # 设置模型为评估模式
-        self.net.eval()
-
-        # 如果您有使用自编码器（如 FC1 和 FC2）也需要加载它们的状态
-        self.fc1 = PersonAutoEncoder(34)
-        self.fc1.load_state_dict(torch.load(args.fc1_model_path, map_location=args.device))
-        self.fc2 = GarmentAutoEncoder(34)
-        self.fc2.load_state_dict(torch.load(args.fc2_model_path, map_location=args.device))
 
     def linear_beta_scheduler(self):
         # 产生一个扩散过程的线性 beta 调度
@@ -164,7 +153,7 @@ class Diffusion:
         sqrt_alpha_timestep = torch.sqrt(self.alpha_cumprod[t])[:, None, None, None]
         sqrt_one_minus_alpha_timestep = torch.sqrt(1 - self.alpha_cumprod[t])[:, None, None, None]
         epsilon = torch.randn_like(img)
-        return (sqrt_alpha_timestep * epsilon) + (sqrt_one_minus_alpha_timestep * epsilon), epsilon
+        return (sqrt_alpha_timestep * img) + (sqrt_one_minus_alpha_timestep * epsilon), epsilon
 
     @torch.inference_mode()
     def sample(self, use_ema, conditional_inputs):
@@ -193,7 +182,7 @@ class Diffusion:
 
             # concatenating noise with rgb agnostic image across channels
             # corrupt -> concatenate -> predict
-            x = torch.cat((inp_network_noise, ia), dim=1).to(self.device)
+            x = torch.cat((ia,inp_network_noise), dim=1).to(self.device)
 
             for i in reversed(range(1, self.time_steps)):
                 t = (torch.ones(batch_size) * i).long().to(self.device)
@@ -240,56 +229,63 @@ class Diffusion:
         dataloader.sampler.set_epoch(epoch)
 
         for ip, jp, jg, ia, ic, itr128 in (tqdm(dataloader) if args.rank == 0 else dataloader):
+            torch.cuda.empty_cache()
+
             # 这里是针对每个 epoch 过大，在中间 ?% 进行一步模型权重存储临时使用
-            # if train == True:
-            #     if self.running_train_steps == round(0.2 * every_epoch_steps):
+            # if self.running_train_steps == round(0.01 * every_epoch_steps):
+            #     if dist.get_rank() == 0:
             #         print("Now temp save checkpoints.")
-            #         self.save_models(0, self.unet_dim)
+            #     self.save_models(args.save_model_path, 0, self.unet_dim)
 
             # 对于图像数据，使用列表推导式处理批次中的每个样本
-            ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
-            ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
-            ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
+            with torch.no_grad():
+                ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
+                ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
+                ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
 
-            if (unet_dim == 256):
-                itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
+                if (unet_dim == 256):
+                    itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
 
             # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
-            jp_data = []
-            for jp_item in jp:
-                with open(jp_item, 'r') as jp_item:
-                    jp_json = json.load(jp_item)
-                    jp_json_normalize = normalize_lst(jp_json)
-                    jp_data.append(jp_json_normalize)
-            jp_tensor = torch.tensor(jp_data)
-            jp_fc1 = self.fc1(jp_tensor)
-            jp = jp_fc1[1].clone().detach().to(self.device)
+            with torch.no_grad():
+                jp_data = []
+                for jp_item in jp:
+                    with open(jp_item, 'r') as jp_item:
+                        jp_json = json.load(jp_item)
+                        jp_json_normalize = normalize_lst(jp_json)
+                        jp_data.append(jp_json_normalize)
+                jp_tensor = torch.tensor(jp_data)
+                jp_fc1 = self.fc1(jp_tensor)
+                jp = jp_fc1[1]
             
-            jg_data = []
-            for jg_item in jg:
-                with open(jg_item, 'r') as jg_item:
-                    jg_json = json.load(jg_item)
-                    jg_json_normalize = normalize_lst(jg_json)
-                    jg_data.append(jg_json_normalize)
-            jg_tensor = torch.tensor(jg_data)
-            jg_fc2 = self.fc2(jg_tensor)
-            jg = jg_fc2[1].clone().detach().to(self.device)
+                jg_data = []
+                for jg_item in jg:
+                    with open(jg_item, 'r') as jg_item:
+                        jg_json = json.load(jg_item)
+                        jg_json_normalize = normalize_lst(jg_json)
+                        jg_data.append(jg_json_normalize)
+                jg_tensor = torch.tensor(jg_data)
+                jg_fc2 = self.fc2(jg_tensor)
+                jg = jg_fc2[1]
 
             with torch.autocast('cuda') and torch.enable_grad():
-                t = self.sample_time_steps(ip_batch.shape[0]).to(self.device)
+                t = self.sample_time_steps(ip_batch.shape[0])
 
                 # corrupt -> concatenate -> predict
                 # 对 ip 添加 noise 变成 zt
                 zt, noise_epsilon = self.add_noise_to_img(ip_batch, t)
 
                 # unet128: ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
+                # person-UNet 将ia和噪声图像 𝐳t作为输入
+                # 由于ia 和 𝐳t是按像素对齐的，因此我们在 UNet 处理开始时直接沿通道维度将它们连接起来
                 if (unet_dim == 128):
-                    zt = torch.cat((ia_batch, zt), dim=1).to(self.device)
+                    zt = torch.cat((ia_batch, zt), dim=1)
                 # unet256: itr128, ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
                 elif (unet_dim == 256):
-                    zt = torch.cat((ia_batch, zt, itr128_batch), dim=1).to(self.device)
+                    zt = torch.cat((ia_batch, zt, itr128_batch), dim=1)
 
                 # 利用torch.cuda.amp.autocast控制前向过程中是否使用半精度计算
+                # garment-UNet 将ic作为输入
                 with torch.cuda.amp.autocast(enabled=args.use_mix_precision):
                     predicted_noise = self.net(zt, ic_batch, jp, jg, t)
                     loss = self.mse(noise_epsilon, predicted_noise)
@@ -320,36 +316,39 @@ class Diffusion:
         for ip, jp, jg, ia, ic, itr128 in dataloader:
 
             # 对于图像数据，使用列表推导式处理批次中的每个样本
-            ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
-            ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
-            ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
+            with torch.no_grad():
+                ia_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ia])
+                ic_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in ic])
+                ip_batch = torch.cat([create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device) for path in ip])
 
             if (unet_dim == 256):
-                itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
-
-            # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
-            jp_data = []
-            for jp_item in jp:
-                with open(jp_item, 'r') as jp_item:
-                    jp_json = json.load(jp_item)
-                    jp_json_normalize = normalize_lst(jp_json)
-                    jp_data.append(jp_json_normalize)
-            jp_tensor = torch.tensor(jp_data)
-            jp_fc1 = self.fc1(jp_tensor)
-            jp = jp_fc1[1].clone().detach().to(self.device)
+                with torch.no_grad():
+                    itr128_batch = torch.cat([smoothen_image(create_transforms_imgs(read_img(path), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device) for path in itr128])
             
-            jg_data = []
-            for jg_item in jg:
-                with open(jg_item, 'r') as jg_item:
-                    jg_json = json.load(jg_item)
-                    jg_json_normalize = normalize_lst(jg_json)
-                    jg_data.append(jg_json_normalize)
-            jg_tensor = torch.tensor(jg_data)
-            jg_fc2 = self.fc2(jg_tensor)
-            jg = jg_fc2[1].clone().detach().to(self.device)
+            with torch.no_grad():
+                # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
+                jp_data = []
+                for jp_item in jp:
+                    with open(jp_item, 'r') as jp_item:
+                        jp_json = json.load(jp_item)
+                        jp_json_normalize = normalize_lst(jp_json)
+                        jp_data.append(jp_json_normalize)
+                jp_tensor = torch.tensor(jp_data)
+                jp_fc1 = self.fc1(jp_tensor)
+                jp = jp_fc1[1]
+                
+                jg_data = []
+                for jg_item in jg:
+                    with open(jg_item, 'r') as jg_item:
+                        jg_json = json.load(jg_item)
+                        jg_json_normalize = normalize_lst(jg_json)
+                        jg_data.append(jg_json_normalize)
+                jg_tensor = torch.tensor(jg_data)
+                jg_fc2 = self.fc2(jg_tensor)
+                jg = jg_fc2[1]
 
             with torch.autocast('cuda') and torch.inference_mode():
-                t = self.sample_time_steps(ip_batch.shape[0]).to(self.device)
+                t = self.sample_time_steps(ip_batch.shape[0])
 
                 # corrupt -> concatenate -> predict
                 # 对 ip 添加 noise 变成 zt
@@ -357,10 +356,10 @@ class Diffusion:
 
                 # unet128: ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
                 if (unet_dim == 128):
-                    zt = torch.cat((ia_batch, zt), dim=1).to(self.device)
+                    zt = torch.cat((ia_batch, zt), dim=1)
                 # unet256: itr128, ia 与 zt 进行 concat，用 zt 表示，准备将数据输入网络中
                 elif (unet_dim == 256):
-                    zt = torch.cat((ia_batch, zt, itr128_batch), dim=1).to(self.device)
+                    zt = torch.cat((ia_batch, zt, itr128_batch), dim=1)
 
                 # 执行具体的网络
                 predicted_noise = self.net(zt, ic_batch, jp, jg, t)
@@ -420,23 +419,24 @@ class Diffusion:
                     itr128_item.unsqueeze_(0)
 
                 # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
-                jp_data = []
-                with open(jp[i], 'r') as jp_item:
-                    jp_json = json.load(jp_item)
-                    jp_json_normalize = normalize_lst(jp_json)
-                    jp_data.append(jp_json_normalize)
-                jp_tensor = torch.tensor(jp_data)
-                jp_fc1 = self.fc1(jp_tensor)
-                jp_item = jp_fc1[1].clone().detach().to(self.device)
-                
-                jg_data = []
-                with open(jg[i], 'r') as jg_item:
-                    jg_json = json.load(jg_item)
-                    jg_json_normalize = normalize_lst(jg_json)
-                    jg_data.append(jg_json_normalize)
-                jg_tensor = torch.tensor(jg_data)
-                jg_fc2 = self.fc2(jg_tensor)
-                jg_item = jg_fc2[1].clone().detach().to(self.device)
+                with torch.no_grad():
+                    jp_data = []
+                    with open(jp[i], 'r') as jp_item:
+                        jp_json = json.load(jp_item)
+                        jp_json_normalize = normalize_lst(jp_json)
+                        jp_data.append(jp_json_normalize)
+                    jp_tensor = torch.tensor(jp_data)
+                    jp_fc1 = self.fc1(jp_tensor)
+                    jp_item = jp_fc1[1]
+                    
+                    jg_data = []
+                    with open(jg[i], 'r') as jg_item:
+                        jg_json = json.load(jg_item)
+                        jg_json_normalize = normalize_lst(jg_json)
+                        jg_data.append(jg_json_normalize)
+                    jg_tensor = torch.tensor(jg_data)
+                    jg_fc2 = self.fc2(jg_tensor)
+                    jg_item = jg_fc2[1]
 
                 # sampled image
                 sampled_image = self.sample(use_ema=False, conditional_inputs=(ia_item, ic_item, jp_item, jg_item))
@@ -484,16 +484,16 @@ class Diffusion:
                     # cv2.imwrite(os.path.join(images_folder, "ema_sampled.jpg"), ema_sampled_image)
                     print(f"In val: Saved epoch:{epoch+1} images")
 
-    def save_models(self, epoch=-1, unet_dim=128):
+    def save_models(self, save_model_path, epoch=-1, unet_dim=128):
         # 保存模型的权重和优化器状态
 
         if dist.get_rank() == 0:
             print(f"Save models epoch: {epoch+1}.")
 
             # 模型保存目录
-            ckpt_path = os.path.join("tmp_models", f"ckpt{unet_dim}")
+            ckpt_path = os.path.join(save_model_path, f"ckpt{unet_dim}")
             # ema_ckpt_path = os.path.join("tmp_models", f"ema_ckpt{unet_dim}")
-            optim_path = os.path.join("tmp_models", f"optim{unet_dim}")
+            optim_path = os.path.join(save_model_path, f"optim{unet_dim}")
             # 若目录不存在就创建
             if not os.path.exists(ckpt_path):
                 os.makedirs(ckpt_path)
@@ -502,10 +502,9 @@ class Diffusion:
             if not os.path.exists(optim_path):
                 os.makedirs(optim_path)
             
-            # 单卡GPU训练
-            torch.save(self.net.state_dict(), os.path.join(ckpt_path, f"ckpt_{epoch+1}.pt"))
+            torch.save(self.net.module.state_dict(), os.path.join(ckpt_path, f"ckpt_{epoch+1}.pth"))
             # torch.save(self.ema_net.state_dict(), os.path.join(ema_ckpt_path, f"ema_ckpt_{epoch+1}.pt"))
-            torch.save(self.optimizer.state_dict(), os.path.join(optim_path, f"optim_{epoch+1}.pt"))
+            torch.save(self.optimizer.state_dict(), os.path.join(optim_path, f"optim_{epoch+1}.pth"))
 
     def train(self, args):
         # 开始和管理训练过程
@@ -545,7 +544,7 @@ class Diffusion:
 
             # 指定多少个 epoch 执行完后，对模型进行保存：ckpt.pth, ema_ckpt.pth, optim.pth
             if (epoch + 1) % args.model_saving_frequency == 0:
-                self.save_models(epoch, self.unet_dim)
+                self.save_models(args.save_model_path, epoch, self.unet_dim)
             
             # 指定多少个 epoch 执行完后，对生成的训练集图像进行保存
             # if (epoch + 1) % 100 == 0:

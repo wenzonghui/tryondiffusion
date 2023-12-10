@@ -33,7 +33,9 @@ def calculate_intersection(A, B, C, D):
             y = m_AC * x + c_AC
         return [x, y]
     else:
-        return None  # 平行线没有交点
+        x = A[0] + (B[0] - A[0])/2
+        y = B[1] + (C[1] - B[1])/2
+        return [x, y]  # 平行线没有交点
 
 def get_points(json_path):
     # 利用mmpose得到的关键点坐标，通过程序处理得到7个关键点：鼻子1，左眼睛2，右眼睛3，左肩膀6，右肩膀7，左大腿根12， 右大腿根13
@@ -171,10 +173,14 @@ def seg_bg(image_path, json_path, output_dir, sam):
     from segment_anything import sam_model_registry, SamPredictor
 
     # 获取关键点
-    left_top_point = [10, 10]
-    right_top_point = [758, 10]
-    left_bottom_point = [10, 1014]
-    right_bottom_point = [758, 1014]
+    left_top_point = [52, 10]
+    right_top_point = [204, 10]
+    left_bottom_point = [52, 246]
+    right_bottom_point = [204, 246]
+    left_top_point2 = [10, 10]
+    right_top_point2 = [246, 10]
+    left_bottom_point2 = [246, 246]
+    right_bottom_point2 = [10, 246]
 
     # 打开图片
     print(image_path)
@@ -191,8 +197,8 @@ def seg_bg(image_path, json_path, output_dir, sam):
     predictor.set_image(image)
 
     # 分割用到的关键点
-    input_point = np.array([left_top_point, right_top_point, left_bottom_point, right_bottom_point])
-    input_label = np.array([1, 1, 1, 1])
+    input_point = np.array([left_top_point, right_top_point, left_bottom_point, right_bottom_point, left_top_point2, right_top_point2, left_bottom_point2, right_bottom_point2])
+    input_label = np.array([1, 1, 1, 1, 1, 1, 1, 1])
 
     masks, scores, logits = predictor.predict(
         point_coords=input_point,
@@ -681,8 +687,8 @@ if __name__ == "__main__":
     sam.to(device="cuda")
 
 
-    # image_dir = '/home/xkmb/data/train/ig'
-    # json_dir = '/home/xkmb/pose_output/train/ig/predictions'
-    # mask_dir = '/home/xkmb/data/train/ig_mask'
+    image_dir = '/home/xkmb/data/train/ig'
+    json_dir = '/home/xkmb/data/pose/train/ig/predictions'
+    mask_dir = '/home/xkmb/data/train/ig_mask'
 
-    # seg_any(image_dir, json_dir, mask_dir, seg_up, sam)
+    seg_any(image_dir, json_dir, mask_dir, seg_up, sam)

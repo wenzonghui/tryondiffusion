@@ -76,7 +76,15 @@ def start_pose_jsons_process(input_dir, output_dir):
 
 if __name__ == "__main__":
     # 批量处理 mmpose 得到的 姿势识别 json，主要在预处理阶段
-    input_dir = "/home/xkmb/pose_output/val"
-    output_dir = "/home/xkmb/data/val"
+    input_dir = "/home/xkmb/下载/data/pose/train"
+    output_dir = "/home/xkmb/下载/data/train"
 
     start_pose_jsons_process(input_dir, output_dir)
+
+# rm 0006152.jpg 0006091.jpg 0009314.jpg 0009336.jpg 0011986.jpg 0012071.jpg 0012535.jpg 0010771.jpg 0010425.jpg 0010301.jpg 0009071.jpg 0009056.jpg 0009016.jpg 0008583.jpg 0006899.jpg 0004555.jpg
+
+# rm 0006152.json 0006091.json 0009314.json 0009336.json 0011986.json 0012071.json 0012535.json 0010771.json 0010425.json 0010301.json 0009071.json 0009056.json 0009016.json 0008583.json 0006899.json 0004555.json
+
+# rm 0002506.jpg 0005489.jpg 0005630.jpg 0005777.jpg 0005778.jpg 0005835.jpg
+
+# rm 0002506.json 0005489.json 0005630.json 0005777.json 0005778.json 0005835.json

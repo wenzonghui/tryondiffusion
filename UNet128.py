@@ -7,7 +7,8 @@
 
 import torch
 from torch import nn
-
+from pre_processing.person_pose_embedding.network import AutoEncoder as PersonAutoEncoder
+from pre_processing.garment_pose_embedding.network import AutoEncoder as GarmentAutoEncoder
 from network_elem import UNetBlockNoAttention, DownSample, UNetBlockAttention, UpSample, SinusoidalPosEmbed, AttentionPool1d
 
 
@@ -25,7 +26,7 @@ class UNet128(nn.Module):
         # initial image embedding size 128x128 and 6 channels(concatenate rgb agnostic image and noise)
 
         # 3x3 conv layer person
-        # 这里之所以是 6：因为 Ia 和 Zt 进行 concat，通道变为 6
+        # person UNet：这里之所以是 6：因为 Ia 和 Zt 进行 concat 得到 Zt，通道变为 6
         self.init_conv_person = nn.Conv2d(6, 128, (3, 3), padding=1)
 
         # 128 unit encoder person
@@ -66,6 +67,7 @@ class UNet128(nn.Module):
         # initial image embedding size 128x128 and 3 channels
 
         # 3x3 conv layer garment
+        # garment UNet 输入 ic, 所以通道是3
         self.init_conv_garment = nn.Conv2d(3, 128, (3, 3), padding=1)
 
         # 128 unit encoder garment
@@ -189,22 +191,35 @@ class UNet128(nn.Module):
         zt_final = self.final_conv_person(zt_128_2)
 
         return zt_final
-
+    
 
 if __name__ == "__main__":
-    time_step = torch.randint(low=1, high=1000, size=(4,))
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device = torch.device("cpu")
-
     # 测试 UNet128 网络
-    net128 = UNet128(8, device).to(device)
+    net128 = UNet128(pose_embed_len_dim=8).to(device)
+    fc1 = PersonAutoEncoder(34)
+    fc2 = GarmentAutoEncoder(34)
     # def forward(self, zt, ic, person_pose_embedding, garment_pose_embedding, time_step, noise_level):
     # 这里之所以是 6：因为 Ia 和 Zt 进行 concat，通道变为 6
-    out128 = net128(torch.randn(4, 6, 128, 128).to(device),
-                    torch.randn(4, 3, 128, 128).to(device),
-                    torch.randn(4, 8).to(device),
-                    torch.randn(4, 8).to(device),
-                    time_step.to(device),
-                    0.3)
 
-    print("out128: ", out128.size())
+    # 输入模型的样本
+    zt_sample = torch.randn(4, 6, 128, 128).to(device)
+    ic_sample = torch.randn(4, 3, 128, 128).to(device)
+    pose_embedding_sample = torch.randn(4, 8).to(device)
+    time_step_sample = torch.randint(low=1, high=1000, size=(4,)).to(device)
+    x = torch.rand(1, 34)
+    # out128 = net128(zt_sample, ic_sample, pose_embedding_sample, pose_embedding_sample, time_step_sample)
+    # print("out128: ", out128.size())
+    
+    # 计算网络参数量
+    from thop import profile
+    macs_unet128, params_unet128 = profile(net128, inputs=(zt_sample,ic_sample,pose_embedding_sample, pose_embedding_sample, time_step_sample))
+    print('UNet128 Params: ', params_unet128)
+
+    macs_fc1, params_fc1 = profile(fc1, inputs=(x))
+    print('FC1 Params: ', params_fc1)
+
+    macs_fc2, params_fc2 = profile(fc2, inputs=(x))
+    print('FC2 Params: ', params_fc2)
+
+    print("Total Params: ", params_unet128 + params_fc1 + params_fc2)

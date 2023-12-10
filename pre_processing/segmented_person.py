@@ -5,7 +5,7 @@
 import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
-from pre_processing.generate_mask import seg_any, seg_anyone, seg_bg, seg_person_left_arm, seg_person_neck, seg_person_right_arm, seg_up
+from generate_mask import seg_any, seg_anyone, seg_bg, seg_person_left_arm, seg_person_neck, seg_person_right_arm, seg_up
 
 def get_upper_garment(img, img_parse_map):
     sum_img_parse_map = np.sum(img_parse_map, axis=2)
@@ -112,19 +112,19 @@ if __name__ == "__main__":
     # mask_dir = '/home/xkmb/tryondiffusion/segment_anything_main/test/mask'
     # output_dir = "/home/xkmb/tryondiffusion/segment_anything_main/test/ia"
     # 正式执行分割任务
-    image_dir = '/home/xkmb/data/train/ip'
-    json_dir = '/home/xkmb/pose_output/train/ip/predictions'
-    mask_dir = '/home/xkmb/data/train/ip_mask'
-    output_dir = "/home/xkmb/data/train/ia"
+    image_dir = '/home/xkmb/data/val/ia'
+    json_dir = '/home/xkmb/data/pose/val/ip/predictions'
+    mask_dir = '/home/xkmb/data/val/ip_mask'
+    output_dir = "/home/xkmb/data/val/ia"
 
     seg_any(image_dir, json_dir, mask_dir, seg_up, sam)
     start_seg_persons(image_dir, mask_dir, output_dir)
-    seg_any(output_dir, json_dir, mask_dir, seg_bg, sam)
-    start_seg_persons(output_dir, mask_dir, output_dir)
-    seg_any(output_dir, json_dir, mask_dir, seg_person_left_arm, sam)
-    start_seg_persons(output_dir, mask_dir, output_dir)
-    seg_any(output_dir, json_dir, mask_dir, seg_person_right_arm, sam)
-    start_seg_persons(output_dir, mask_dir, output_dir)
+    # seg_any(image_dir, json_dir, mask_dir, seg_bg, sam)
+    # start_seg_persons(image_dir, mask_dir, output_dir)
+    # seg_any(output_dir, json_dir, mask_dir, seg_person_left_arm, sam)
+    # start_seg_persons(output_dir, mask_dir, output_dir)
+    # seg_any(output_dir, json_dir, mask_dir, seg_person_right_arm, sam)
+    # start_seg_persons(output_dir, mask_dir, output_dir)
     # seg_any(output_dir, json_dir, mask_dir, seg_person_neck, sam)
     # start_seg_persons(output_dir, mask_dir, output_dir)
 

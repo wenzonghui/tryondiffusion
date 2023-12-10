@@ -10,62 +10,9 @@ from pre_processing.person_pose_embedding.utils.dataloader import normalize_lst
 from pre_processing.pose_json_preprocess import start_pose_json_process
 from pre_processing.segmented_garment import start_seg_garment
 from pre_processing.segmented_person import start_seg_person
-from pre_processing.person_pose_embedding.network import AutoEncoder as PersonAutoEncoder
-from pre_processing.garment_pose_embedding.network import AutoEncoder as GarmentAutoEncoder
 from utils.dataloader_train import create_transforms_imgs
 from utils.utils import read_img
-from diffusion import Diffusion
-from UNet128 import UNet128
-from UNet256 import UNet256
-
-
-def load_fc1():
-    # 加载 fc1，用于 jp-->Person pose embedding
-
-    device = 'cuda'
-    fc1_model_path = '/home/xkmb/tryondiffusion/models/fc1.pth'
-    fc1_model = PersonAutoEncoder(34)
-    fc1_model.load_state_dict(torch.load(fc1_model_path, map_location=device))
-
-    return fc1_model
-
-
-def load_fc2():
-    # 加载 fc2，用于 jg-->Garment pose embedding
-
-    device = 'cuda'
-    fc2_model_path = '/home/xkmb/tryondiffusion/models/fc2.pth'
-    fc2_model = GarmentAutoEncoder(34)
-    fc2_model.load_state_dict(torch.load(fc2_model_path, map_location=device))
-
-    return fc2_model
-
-
-def load_unet128():
-    # 加载 unet128，用于第一步网络
-
-    device = 'cuda'
-    unet128_model_path = '/home/xkmb/tryondiffusion/models/unet128.pth'
-    unet128_model = UNet128(pose_embed_dim=8, device=device, time_steps=256).to(device)
-    unet128_model.load_state_dict(torch.load(unet128_model_path, map_location=device))
-
-    return unet128_model
-
-
-def load_unet256():
-    # 加载 unet256，用于第一步网络
-
-    device = 'cuda'
-    unet256_model_path = '/home/xkmb/tryondiffusion/models/unet256.pth'
-    unet256_model = UNet256(pose_embed_dim=8, device=device, time_steps=256).to(device)
-    unet256_model.load_state_dict(torch.load(unet256_model_path, map_location=device))
-
-    return unet256_model
-
-
-def load_unetSR():
-    # 加载 unetSR，用于最后一步网络
-    pass
+from diffusion import Diffusion, smoothen_image
 
 
 def pre_process(person, garment):
@@ -135,11 +82,13 @@ def inference_unet128(person_image_path, garment_image_path, model):
 
     ia = read_img(ia)
     ia = create_transforms_imgs(ia, 128)
+    ia = smoothen_image(ia)
     ia = ia.clone().detach()
     ia.unsqueeze_(0)
 
     ic = read_img(ic)
     ic = create_transforms_imgs(ic, 128)
+    ic = smoothen_image(ic)
     ic = ic.clone().detach()
     ic.unsqueeze_(0)
 
@@ -166,8 +115,8 @@ def inference_unet128(person_image_path, garment_image_path, model):
     sampled_image = sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
 
     # ema sampled image
-    ema_sampled_image = model.sample(use_ema=True, conditional_inputs=(ia, ic, jp, jg))
-    ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
+    # ema_sampled_image = model.sample(use_ema=True, conditional_inputs=(ia, ic, jp, jg))
+    # ema_sampled_image = ema_sampled_image[0].permute(1, 2, 0).squeeze().cpu().numpy()
 
     # base images
     ip_np = ip.squeeze(0).permute(1, 2, 0).squeeze().cpu().numpy()
@@ -188,7 +137,7 @@ def inference_unet128(person_image_path, garment_image_path, model):
     # save sampled image
     cv2.imwrite(os.path.join(save_folder, "itr128.jpg"), sampled_image)
     # save ema sampled image
-    cv2.imwrite(os.path.join(save_folder, "itr128_ema.jpg"), ema_sampled_image)
+    # cv2.imwrite(os.path.join(save_folder, "itr128_ema.jpg"), ema_sampled_image)
     print(f"In inference: Saved images")
 
     itr128_path = os.path.join(save_folder, f"itr128.jpg")
@@ -209,7 +158,8 @@ def inference_sr_diffusion(itr256_path, output_dir):
 class InferenceArgParser:
     def __init__(self):
         self.device = 'cuda'
-        self.model_path = '/home/xkmb/tryondiffusion/tmp_models/ckpt128/ckpt_1.pt'  # 模型文件的路径
+        self.model_path = '/home/xkmb/tryondiffusion/models/ckpt_20.pth'  # 模型文件的路径
+        self.optim_path = '/home/xkmb/tryondiffusion/models/optim_20.pth'  # 模型文件的路径
         self.fc1_model_path = '/home/xkmb/tryondiffusion/models/fc1.pth'  # FC1模型的路径
         self.fc2_model_path = '/home/xkmb/tryondiffusion/models/fc2.pth'  # FC2模型的路径
 
@@ -218,19 +168,12 @@ if __name__ == "__main__":
     inference_args = InferenceArgParser()
 
     # 创建 Diffusion 模型
-    unet128_diffusion_model = Diffusion(device="cuda",
-                                        pose_embed_dim=8,
-                                        time_steps=256,
-                                        beta_start=1e-4,
-                                        beta_end=0.02,
-                                        unet_dim=128,
-                                        noise_input_channel=3,
-                                        beta_ema=0.995)
+    unet128_diffusion_model = Diffusion(device="cuda", pose_embed_dim=8, time_steps=256, beta_start=1e-4, beta_end=0.02, unet_dim=128, noise_input_channel=3, beta_ema=0.995)
 
     unet128_diffusion_model.prepare_for_inference(inference_args)
 
-    person_path = 'data_test/test/person.jpg'
-    garment_path = 'data_test/test/garment.jpg'
+    person_path = 'data/test/person.jpg'
+    garment_path = 'data/test/garment.jpg'
     
     # 调用 inference 函数进行推理并保存结果图像
     inference_unet128(person_path, garment_path, unet128_diffusion_model)
