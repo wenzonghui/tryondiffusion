@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
 
-from generate_mask import seg_any, seg_anyone, seg_up
+from pre_processing.generate_mask import seg_any, seg_anyone, seg_up
 
 def get_upper_garment(img, img_parse_map):
     sum_img_parse_map = np.sum(img_parse_map, axis=2)

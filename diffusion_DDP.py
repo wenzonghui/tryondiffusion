@@ -182,7 +182,7 @@ class Diffusion:
 
             # concatenating noise with rgb agnostic image across channels
             # corrupt -> concatenate -> predict
-            x = torch.cat((ia,inp_network_noise), dim=1).to(self.device)
+            x = torch.cat((ia, inp_network_noise), dim=1).to(self.device)
 
             for i in reversed(range(1, self.time_steps)):
                 t = (torch.ones(batch_size) * i).long().to(self.device)
@@ -268,7 +268,7 @@ class Diffusion:
                 jg_fc2 = self.fc2(jg_tensor)
                 jg = jg_fc2[1]
 
-            with torch.autocast('cuda') and torch.enable_grad():
+            with torch.autocast(self.device) and torch.enable_grad():
                 t = self.sample_time_steps(ip_batch.shape[0])
 
                 # corrupt -> concatenate -> predict
@@ -397,26 +397,12 @@ class Diffusion:
                 # 获取 ip 的文件名
                 person_name = os.path.basename(ip[i])[:-4]
 
-                ia_item = read_img(ia[i])
-                ia_item = create_transforms_imgs(ia_item, unet_dim)
-                ia_item = ia_item.clone().detach()
-                ia_item.unsqueeze_(0)
-
-                ic_item = read_img(ic[i])
-                ic_item = create_transforms_imgs(ic_item, unet_dim)
-                ic_item = ic_item.clone().detach()
-                ic_item.unsqueeze_(0)
-
-                ip_item = read_img(ip[i])
-                ip_item = create_transforms_imgs(ip_item, unet_dim)
-                ip_item = ip_item.clone().detach()
-                ip_item.unsqueeze_(0)
+                ia_item = smoothen_image(create_transforms_imgs(read_img(ia[i]), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device)
+                ic_item = smoothen_image(create_transforms_imgs(read_img(ic[i]), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device)
+                ip_item = create_transforms_imgs(read_img(ip[i]), unet_dim).unsqueeze(0).to(self.device)
 
                 if(unet_dim == 256):
-                    itr128_item = read_img(itr128[i])
-                    itr128_item = create_transforms_imgs(itr128_item, unet_dim)
-                    itr128_item = itr128_item.clone().detach()
-                    itr128_item.unsqueeze_(0)
+                    itr128_item = smoothen_image(create_transforms_imgs(read_img(itr128[i]), unet_dim).unsqueeze(0).to(self.device), self.sigma, self.device)
 
                 # 这里得到的是一个 jp json 的文件路径，先读取 json 的内容，转换成 tensor，再通过 FC 网络处理
                 with torch.no_grad():

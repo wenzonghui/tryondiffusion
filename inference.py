@@ -61,7 +61,7 @@ def pre_process(person, garment):
     return person, garment, ia, ic, jp_json_normlize, jg_json_normlize, task_name
 
 
-def inference_unet128(person_image_path, garment_image_path, model):
+def inference_unet128(args, person_image_path, garment_image_path, model):
     # 加载模型
     # model.load_state_dict(torch.load('tmp_models/ckpt128/ckpt_0.pt'))
     # model.eval()
@@ -70,27 +70,10 @@ def inference_unet128(person_image_path, garment_image_path, model):
     # 假设 pre_process 函数能够正确处理输入图片，并返回模型需要的所有输入参数
     ip, ig, ia, ic, jp, jg, task_name = pre_process(person_image_path, garment_image_path)
 
-    ip = read_img(ip)
-    ip = create_transforms_imgs(ip, 128)
-    ip = ip.clone().detach()
-    ip.unsqueeze_(0)
-
-    ig = read_img(ig)
-    ig = create_transforms_imgs(ig, 128)
-    ig = ig.clone().detach()
-    ig.unsqueeze_(0)
-
-    ia = read_img(ia)
-    ia = create_transforms_imgs(ia, 128)
-    ia = smoothen_image(ia)
-    ia = ia.clone().detach()
-    ia.unsqueeze_(0)
-
-    ic = read_img(ic)
-    ic = create_transforms_imgs(ic, 128)
-    ic = smoothen_image(ic)
-    ic = ic.clone().detach()
-    ic.unsqueeze_(0)
+    ia = smoothen_image(create_transforms_imgs(read_img(ia), args.unet_dim).unsqueeze(0).to(args.device), args.sigma, args.device)
+    ic = smoothen_image(create_transforms_imgs(read_img(ic), args.unet_dim).unsqueeze(0).to(args.device), args.sigma, args.device)
+    ip = create_transforms_imgs(read_img(ip), args.unet_dim).unsqueeze(0).to(args.device)
+    ig = create_transforms_imgs(read_img(ig), args.unet_dim).unsqueeze(0).to(args.device)
 
     jp_data = []
     with open(jp, 'r') as jp:
@@ -99,7 +82,7 @@ def inference_unet128(person_image_path, garment_image_path, model):
         jp_data.append(jp_json_normalize)
     jp_tensor = torch.tensor(jp_data)
     jp_fc1 = model.fc1(jp_tensor)
-    jp = jp_fc1[1].clone().detach().to('cuda')
+    jp = jp_fc1[1]
     
     jg_data = []
     with open(jg, 'r') as jg:
@@ -108,7 +91,7 @@ def inference_unet128(person_image_path, garment_image_path, model):
         jg_data.append(jg_json_normalize)
     jg_tensor = torch.tensor(jg_data)
     jg_fc2 = model.fc2(jg_tensor)
-    jg = jg_fc2[1].clone().detach().to('cuda')
+    jg = jg_fc2[1]
 
     # sampled image
     sampled_image = model.sample(use_ema=False, conditional_inputs=(ia, ic, jp, jg))
@@ -158,8 +141,10 @@ def inference_sr_diffusion(itr256_path, output_dir):
 class InferenceArgParser:
     def __init__(self):
         self.device = 'cuda'
-        self.model_path = '/home/xkmb/tryondiffusion/models/ckpt_20.pth'  # 模型文件的路径
-        self.optim_path = '/home/xkmb/tryondiffusion/models/optim_20.pth'  # 模型文件的路径
+        self.use_mix_precision = False
+        self.unet_dim = 128
+        self.sigma = float(torch.FloatTensor(1).uniform_(0.4, 0.6))
+        self.model_path = '/home/xkmb/tryondiffusion/models/ckpt_40.pth'  # 模型文件的路径
         self.fc1_model_path = '/home/xkmb/tryondiffusion/models/fc1.pth'  # FC1模型的路径
         self.fc2_model_path = '/home/xkmb/tryondiffusion/models/fc2.pth'  # FC2模型的路径
 
@@ -168,7 +153,7 @@ if __name__ == "__main__":
     inference_args = InferenceArgParser()
 
     # 创建 Diffusion 模型
-    unet128_diffusion_model = Diffusion(device="cuda", pose_embed_dim=8, time_steps=256, beta_start=1e-4, beta_end=0.02, unet_dim=128, noise_input_channel=3, beta_ema=0.995)
+    unet128_diffusion_model = Diffusion(device="cuda", unet_dim=inference_args.unet_dim, pose_embed_dim=8, time_steps=256, beta_start=1e-4, beta_end=0.02, beta_ema=0.995, noise_input_channel=3)
 
     unet128_diffusion_model.prepare_for_inference(inference_args)
 
@@ -176,4 +161,4 @@ if __name__ == "__main__":
     garment_path = 'data/test/garment.jpg'
     
     # 调用 inference 函数进行推理并保存结果图像
-    inference_unet128(person_path, garment_path, unet128_diffusion_model)
+    inference_unet128(inference_args, person_path, garment_path, unet128_diffusion_model)
