@@ -139,12 +139,13 @@ python -m torch.distributed.launch --nproc_per_node=8 --nnodes=2 --node_rank=1 -
 推理模式务必要符合相应的训练模式
 
 ### 普通单卡模式推理
-
+None
 
 ### 单机多卡 DP 模式推理
-
+None
 
 ### 单机多卡 DDP 模式推理
-
+None
 
 ### 多机多卡 DDP 模式推理
+None
